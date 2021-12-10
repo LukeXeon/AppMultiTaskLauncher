@@ -14,6 +14,7 @@ class RemoteTaskException(
     )
 
     override fun fillInStackTrace(): Throwable {
+        super.fillInStackTrace()
         stackTrace = stackTraceElements
         return this
     }
