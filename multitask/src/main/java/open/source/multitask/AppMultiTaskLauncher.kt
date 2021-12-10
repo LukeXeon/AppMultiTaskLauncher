@@ -3,7 +3,6 @@ package open.source.multitask
 import android.app.Application
 import android.os.Process
 import android.os.SystemClock
-import android.util.Log
 import androidx.annotation.MainThread
 import androidx.collection.ArrayMap
 import kotlinx.coroutines.*
