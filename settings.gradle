@@ -1,0 +1,3 @@
+include ':multitask'
+include ':app'
+rootProject.name = "startup"
