@@ -1,8 +1,10 @@
 package open.source.startup.app
 
 import android.app.Application
+import android.net.Uri
 import open.source.multitask.ActionTask
 import open.source.multitask.AppMultiTaskLauncher
+import open.source.multitask.RemoteTask
 import java.util.concurrent.ConcurrentLinkedQueue
 
 class ApplicationX : Application() {
@@ -36,12 +38,21 @@ class ApplicationX : Application() {
 
             }
         }
-
+        val task5 = object : RemoteTask(
+            "5",
+            Uri.parse("content://${packageName}.remote-task-executor"),
+            "test"
+        ) {
+            override fun handleException(throwable: Throwable) {
+                throwable.printStackTrace()
+            }
+        }
         AppMultiTaskLauncher()
             .addTask(task1)
             .addTask(task2)
             .addTask(task3)
             .addTask(task4)
+            .addTask(task5)
             .start(this)
     }
 }

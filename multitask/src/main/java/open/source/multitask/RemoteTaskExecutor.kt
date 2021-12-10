@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import androidx.collection.ArrayMap
 
 abstract class RemoteTaskExecutor : ContentProvider() {
 
@@ -14,6 +15,8 @@ abstract class RemoteTaskExecutor : ContentProvider() {
         internal const val RESULT_OK = 1
         internal const val RESULT_EXCEPTION = 2
     }
+
+    private val methodLocks by lazy { ArrayMap<String, BooleanArray>() }
 
     final override fun onCreate(): Boolean {
         return true
@@ -27,13 +30,21 @@ abstract class RemoteTaskExecutor : ContentProvider() {
         extras: Bundle?
     ): Bundle {
         return try {
-            execute(method, extras!!)
+            val lock = synchronized(methodLocks) {
+                methodLocks.getOrPut(method) { booleanArrayOf(false) }
+            }
+            synchronized(lock) {
+                if (!lock[0]) {
+                    execute(method, extras ?: Bundle.EMPTY)
+                    lock[0] = true
+                }
+            }
             Bundle().apply {
                 putInt(CODE_KEY, RESULT_OK)
             }
         } catch (e: Throwable) {
             Bundle().apply {
-                putInt(CODE_KEY, RESULT_OK)
+                putInt(CODE_KEY, RESULT_EXCEPTION)
                 putParcelable(EXCEPTION_KEY, RemoteTaskException(e))
             }
         }

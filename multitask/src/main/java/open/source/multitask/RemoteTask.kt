@@ -4,7 +4,7 @@ import android.app.Application
 import android.net.Uri
 import android.os.Bundle
 
-abstract class RemoteTask @JvmOverloads constructor(
+open class RemoteTask @JvmOverloads constructor(
     name: String,
     private val path: Uri,
     private val method: String,
@@ -19,7 +19,13 @@ abstract class RemoteTask @JvmOverloads constructor(
             handleException(e)
             return
         }
-        when (result.getInt(RemoteTaskExecutor.CODE_KEY)) {
+        result.classLoader = RemoteTaskException::class.java.classLoader
+        val code = try {
+            result.getInt(RemoteTaskExecutor.CODE_KEY)
+        } catch (e: Throwable) {
+            handleException(e)
+        }
+        when (code) {
             RemoteTaskExecutor.RESULT_OK -> {
                 return
             }
@@ -31,6 +37,7 @@ abstract class RemoteTask @JvmOverloads constructor(
             }
             else -> throw AssertionError()
         }
+
     }
 
     open fun handleException(throwable: Throwable) {

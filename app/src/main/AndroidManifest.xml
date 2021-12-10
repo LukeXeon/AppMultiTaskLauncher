@@ -17,6 +17,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <provider
+            android:name=".app.AppRemoteTaskExecutor"
+            android:authorities="${applicationId}.remote-task-executor"
+            android:exported="false"
+            android:process=":remote" />
     </application>
 
 </manifest>

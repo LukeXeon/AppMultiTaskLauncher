@@ -2,28 +2,32 @@ package open.source.multitask
 
 import android.os.Parcel
 import android.os.Parcelable
+import java.lang.Exception
 
 class RemoteTaskException(
     message: String?,
-    private val stackTraceElements: Array<StackTraceElement>
-) : Exception(message), Parcelable {
+    private val stacks: Array<StackTraceElement>
+) : Exception(message.apply {
+    temp.set(stacks)
+}), Parcelable {
+
+    init {
+        temp.remove()
+    }
 
     constructor(throwable: Throwable) : this(
         "remote exception: " + throwable.javaClass.name,
         throwable.stackTrace
     )
 
-    override fun fillInStackTrace(): Throwable {
-        super.fillInStackTrace()
-        stackTrace = stackTraceElements
-        return this
-    }
-
     override fun writeToParcel(parcel: Parcel, flags: Int) {
         parcel.writeString(message)
-        parcel.writeInt(stackTraceElements.size)
-        stackTraceElements.forEach {
-            parcel.writeSerializable(it)
+        parcel.writeInt(stacks.size)
+        stacks.forEach {
+            parcel.writeString(it.className)
+            parcel.writeString(it.fileName)
+            parcel.writeString(it.methodName)
+            parcel.writeInt(it.lineNumber)
         }
     }
 
@@ -31,15 +35,29 @@ class RemoteTaskException(
         return 0
     }
 
+    override fun fillInStackTrace(): Throwable {
+        super.fillInStackTrace()
+        // 系统阴间case，调用这个函数的时候，子类构造函数还没执行完成，取不到子类变量
+        stackTrace = temp.get() ?: stacks
+        return this
+    }
+
     companion object CREATOR : Parcelable.Creator<RemoteTaskException> {
+
+        private val temp = ThreadLocal<Array<StackTraceElement>>()
 
         override fun createFromParcel(parcel: Parcel): RemoteTaskException {
             val message = parcel.readString()
             val count = parcel.readInt()
-            val stack = Array(count) {
-                parcel.readSerializable() as StackTraceElement
+            val stacks = Array(count) {
+                StackTraceElement(
+                    parcel.readString(),
+                    parcel.readString(),
+                    parcel.readString(),
+                    parcel.readInt()
+                )
             }
-            return RemoteTaskException(message, stack)
+            return RemoteTaskException(message, stacks)
         }
 
         override fun newArray(size: Int): Array<RemoteTaskException?> {
