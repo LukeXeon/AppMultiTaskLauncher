@@ -104,7 +104,7 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
             override fun run(application: Application) {
                 (mainThread.executor as ExecutorService).shutdown()
                 (backgroundThread.executor as ExecutorService).shutdown()
-                tracker.allTaskFinished(SystemClock.uptimeMillis() - start)
+                tracker.allTasksFinished(SystemClock.uptimeMillis() - start)
             }
         })
         val types = ArrayMap<Class<*>, Task>(tasks.size)

@@ -7,7 +7,7 @@ interface TaskTracker {
 
     fun taskFinished(name: String, time: Long)
 
-    fun allTaskFinished(time: Long)
+    fun allTasksFinished(time: Long)
 
     companion object Default : TaskTracker {
         private const val TAG = "TaskTracker"
@@ -27,7 +27,7 @@ interface TaskTracker {
             )
         }
 
-        override fun allTaskFinished(time: Long) {
+        override fun allTasksFinished(time: Long) {
             Log.d(TAG, "all task finished, use time: $time")
         }
 
