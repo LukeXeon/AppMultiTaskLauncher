@@ -19,7 +19,6 @@ class AppMultiTaskLauncher {
     companion object {
         private const val TAG = "AppMultiTaskLauncher"
         private val REENTRY_CHECK = AtomicBoolean()
-        private val COMPLETE_TASK_NAME = UUID.randomUUID().toString()
     }
 
     init {
@@ -28,6 +27,7 @@ class AppMultiTaskLauncher {
         }
     }
 
+    private val completeTaskName = UUID.randomUUID().toString()
     private val tasks = LinkedList<Task>()
     private val mainThread = ExclusiveMainThreadExecutor()
         .asCoroutineDispatcher()
@@ -57,14 +57,14 @@ class AppMultiTaskLauncher {
             dependencies.joinAll()
             val name = action.name
             val start = SystemClock.uptimeMillis()
-            if (name != COMPLETE_TASK_NAME) {
+            if (name != completeTaskName) {
                 Log.v(
                     TAG, "task started: $name, " +
                             "thread: ${Thread.currentThread().name}"
                 )
             }
             action.execute(application)
-            if (name != COMPLETE_TASK_NAME) {
+            if (name != completeTaskName) {
                 Log.v(
                     TAG, "task finish: $name, " +
                             "thread: ${Thread.currentThread().name}, " +
@@ -103,7 +103,7 @@ class AppMultiTaskLauncher {
     fun start(application: Application) {
         val start = SystemClock.uptimeMillis()
         tasks.add(object : ActionTask(
-            COMPLETE_TASK_NAME,
+            completeTaskName,
             false,
             tasks.map { it.javaClass }
         ) {
