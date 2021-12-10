@@ -15,7 +15,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 
-class AppMultiTaskLauncher {
+class AppMultiTaskLauncher @JvmOverloads constructor(
+    private val tracker: TaskTracker = TaskTracker.Default
+) {
     companion object {
         private const val TAG = "AppMultiTaskLauncher"
         private val REENTRY_CHECK = AtomicBoolean()
@@ -58,18 +60,11 @@ class AppMultiTaskLauncher {
             val name = action.name
             val start = SystemClock.uptimeMillis()
             if (name != completeTaskName) {
-                Log.v(
-                    TAG, "task started: $name, " +
-                            "thread: ${Thread.currentThread().name}"
-                )
+                tracker.taskStarted(name)
             }
             action.execute(application)
             if (name != completeTaskName) {
-                Log.v(
-                    TAG, "task finish: $name, " +
-                            "thread: ${Thread.currentThread().name}, " +
-                            "use time: ${SystemClock.uptimeMillis() - start}"
-                )
+                tracker.taskFinished(name, SystemClock.uptimeMillis() - start)
             }
         }
     }
@@ -110,7 +105,7 @@ class AppMultiTaskLauncher {
             override fun run(application: Application) {
                 (mainThread.executor as ExecutorService).shutdown()
                 (backgroundThread.executor as ExecutorService).shutdown()
-                Log.d(TAG, "all task finished, use time: ${SystemClock.uptimeMillis() - start}")
+                tracker.allTaskFinished(SystemClock.uptimeMillis() - start)
             }
         })
         val types = ArrayMap<Class<*>, Task>(tasks.size)
