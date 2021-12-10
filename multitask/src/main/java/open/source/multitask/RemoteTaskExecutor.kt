@@ -1,64 +1,70 @@
 package open.source.multitask
 
-import android.app.Application
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.database.Cursor
+import android.net.Uri
 import android.os.Bundle
-import android.os.Process
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.ThreadFactory
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
-import kotlin.math.max
 
-abstract class RemoteTaskExecutor : BroadcastReceiver() {
+abstract class RemoteTaskExecutor : ContentProvider() {
 
     companion object {
+        internal const val CODE_KEY = "code"
         internal const val EXCEPTION_KEY = "exception"
         internal const val RESULT_OK = 1
         internal const val RESULT_EXCEPTION = 2
-        private val executor by lazy {
-            ThreadPoolExecutor(
-                0,
-                max(4, Runtime.getRuntime().availableProcessors()),
-                10,
-                TimeUnit.SECONDS,
-                LinkedBlockingQueue(),
-                object : ThreadFactory {
-                    private val count = AtomicInteger(0)
-
-                    override fun newThread(r: Runnable): Thread {
-                        return object : Thread("startup-remote-" + count.getAndIncrement()) {
-                            override fun run() {
-                                Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
-                                r.run()
-                            }
-                        }
-                    }
-                }
-            )
-        }
     }
 
-    protected abstract fun execute(application: Application)
+    final override fun onCreate(): Boolean {
+        return true
+    }
 
-    final override fun onReceive(context: Context, intent: Intent?) {
-        val application = context.applicationContext as Application
-        val pendingIntent = goAsync()
-        executor.execute {
-            val exception = runCatching {
-                execute(application)
-            }.exceptionOrNull()
-            if (exception != null) {
-                val bundle = Bundle()
-                bundle.putParcelable(EXCEPTION_KEY, RemoteTaskException(exception))
-                pendingIntent.setResult(RESULT_EXCEPTION, null, bundle)
-            } else {
-                pendingIntent.setResult(RESULT_OK, null, null)
+    abstract fun execute(method: String, args: Bundle)
+
+    final override fun call(
+        method: String,
+        arg: String?,
+        extras: Bundle?
+    ): Bundle {
+        return try {
+            execute(method, extras!!)
+            Bundle().apply {
+                putInt(CODE_KEY, RESULT_OK)
             }
-            pendingIntent.finish()
+        } catch (e: Throwable) {
+            Bundle().apply {
+                putInt(CODE_KEY, RESULT_OK)
+                putParcelable(EXCEPTION_KEY, RemoteTaskException(e))
+            }
         }
     }
+
+    final override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?
+    ): Cursor? = null
+
+    final override fun getType(uri: Uri): String? = null
+
+    final override fun insert(
+        uri: Uri,
+        values: ContentValues?
+    ): Uri? = null
+
+    final override fun delete(
+        uri: Uri,
+        selection: String?,
+        selectionArgs: Array<out String>?
+    ): Int = 0
+
+    final override fun update(
+        uri: Uri,
+        values: ContentValues?,
+        selection: String?,
+        selectionArgs: Array<out String>?
+    ): Int = 0
+
 }
