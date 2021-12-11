@@ -32,7 +32,7 @@ class ApplicationX : Application() {
         val task4 = object : ActionTask(
             "4",
             isMainThread = false,
-            dependencies = listOf(task1.javaClass, task2.javaClass)
+            dependencies = setOf(task1.javaClass, task2.javaClass)
         ) {
             override fun run(application: Application) {
 
@@ -41,7 +41,8 @@ class ApplicationX : Application() {
         val task5 = object : RemoteTask(
             "5",
             Uri.parse("content://${packageName}.remote-task-executor"),
-            "test"
+            "test",
+            isAwait = false
         ) {
             override fun handleException(throwable: Throwable) {
                 throwable.printStackTrace()

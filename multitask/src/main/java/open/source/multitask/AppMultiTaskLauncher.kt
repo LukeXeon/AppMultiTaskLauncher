@@ -5,6 +5,8 @@ import android.os.Process
 import android.os.SystemClock
 import androidx.annotation.MainThread
 import androidx.collection.ArrayMap
+import androidx.collection.ArraySet
+import androidx.core.os.TraceCompat
 import kotlinx.coroutines.*
 import java.util.*
 import java.util.concurrent.ExecutorService
@@ -12,6 +14,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.collections.ArrayList
 import kotlin.math.max
 
 class AppMultiTaskLauncher @JvmOverloads constructor(
@@ -28,8 +31,8 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
         }
     }
 
-    private val completeTaskName = UUID.randomUUID().toString()
-    private val tasks = LinkedList<Task>()
+    private val skipTaskNames = Array(2) { UUID.randomUUID().toString() }
+    private val tasks = LinkedList<AwaitTask>()
     private val mainThread = ExclusiveMainThreadExecutor()
         .asCoroutineDispatcher()
     private val backgroundThread = ScheduledThreadPoolExecutor(
@@ -58,11 +61,11 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
             dependencies.joinAll()
             val name = action.name
             val start = SystemClock.uptimeMillis()
-            if (name != completeTaskName) {
+            if (!skipTaskNames.contains(name)) {
                 tracker.taskStarted(name)
             }
             action.execute(application)
-            if (name != completeTaskName) {
+            if (!skipTaskNames.contains(name)) {
                 tracker.taskFinished(name, SystemClock.uptimeMillis() - start)
             }
         }
@@ -74,53 +77,81 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
         types: Map<Class<*>, Task>,
         jobs: ArrayMap<Task, Job>
     ): Job {
-        var job = jobs[task]
-        if (job == null) {
-            val dependenciesJobs = LinkedList<Job>()
-            for (dependencyType in task.dependencies) {
-                val awaitTask = types.getValue(dependencyType)
-                dependenciesJobs.add(startJobs(application, awaitTask, types, jobs))
+        return jobs.getOrPut(task) {
+            if (task.dependencies.isEmpty()) {
+                startJob(application, task, emptyList())
+            } else {
+                val dependenciesJobs = ArrayList<Job>(task.dependencies.size)
+                for (dependencyType in task.dependencies) {
+                    val awaitTask = types.getValue(dependencyType)
+                    dependenciesJobs.add(startJobs(application, awaitTask, types, jobs))
+                }
+                startJob(application, task, dependenciesJobs)
             }
-            job = startJob(application, task, dependenciesJobs)
-            jobs[task] = job
         }
-        return job
     }
 
     @MainThread
-    fun addTask(task: Task): AppMultiTaskLauncher {
+    fun addTask(task: AwaitTask): AppMultiTaskLauncher {
         tasks.add(task)
         return this
     }
 
     @MainThread
+    fun addTask(t: Collection<AwaitTask>): AppMultiTaskLauncher {
+        tasks.addAll(t)
+        return this
+    }
+
+    @MainThread
     fun start(application: Application) {
+        TraceCompat.beginSection(TAG)
         val start = SystemClock.uptimeMillis()
-        tasks.add(object : ActionTask(
-            completeTaskName,
-            false,
-            tasks.map { it.javaClass }
-        ) {
-            override fun run(application: Application) {
-                (mainThread.executor as ExecutorService).shutdown()
-                (backgroundThread.executor as ExecutorService).shutdown()
-                tracker.allTasksFinished(SystemClock.uptimeMillis() - start)
-            }
-        })
-        val types = ArrayMap<Class<*>, Task>(tasks.size)
+        val allTasks: MutableMap<Class<out AwaitTask>, AwaitTask> = ArrayMap(tasks.size)
         for (task in tasks) {
-            if (types.put(task.javaClass, task) != null) {
+            if (allTasks.put(task.javaClass, task) != null) {
                 throw IllegalArgumentException()
             }
         }
-        val jobs = ArrayMap<Task, Job>(tasks.size)
-        for (task in tasks) {
-            if (jobs.size < tasks.size) {
-                startJobs(application, task, types, jobs)
+        val awaitDependencies = ArraySet<Class<out Task>>(tasks.size)
+        for ((type, task) in allTasks) {
+            if (task.isAwait) {
+                awaitDependencies.add(type)
+            }
+        }
+        val runningTasks = ArrayMap<Class<*>, Task>(tasks.size + 2)
+        runningTasks.putAll(allTasks)
+        val awaitFinishedTask = object : Task(
+            skipTaskNames[0],
+            isMainThread = false,
+            dependencies = awaitDependencies
+        ) {
+            override suspend fun execute(application: Application) {
+                (mainThread.executor as ExecutorService).shutdown()
+                tracker.awaitTasksFinished(SystemClock.uptimeMillis() - start)
+            }
+        }
+        runningTasks[awaitFinishedTask.javaClass] = awaitFinishedTask
+        val allFinishedTask = object : Task(
+            skipTaskNames[1],
+            isMainThread = false,
+            dependencies = allTasks.keys
+        ) {
+            override suspend fun execute(application: Application) {
+                (backgroundThread.executor as ExecutorService).shutdown()
+                tracker.allTasksFinished(SystemClock.uptimeMillis() - start)
+            }
+        }
+        runningTasks[allFinishedTask.javaClass] = allFinishedTask
+        val jobs = ArrayMap<Task, Job>(runningTasks.size)
+        for (task in runningTasks.values) {
+            if (jobs.size < runningTasks.size) {
+                startJobs(application, task, runningTasks, jobs)
             } else {
                 break
             }
         }
+        TraceCompat.endSection()
     }
 
 }

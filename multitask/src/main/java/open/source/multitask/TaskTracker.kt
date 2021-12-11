@@ -7,6 +7,8 @@ interface TaskTracker {
 
     fun taskFinished(name: String, time: Long)
 
+    fun awaitTasksFinished(time: Long)
+
     fun allTasksFinished(time: Long)
 
     companion object Default : TaskTracker {
@@ -25,6 +27,10 @@ interface TaskTracker {
                         "thread: ${Thread.currentThread().name}, " +
                         "use time: $time"
             )
+        }
+
+        override fun awaitTasksFinished(time: Long) {
+            Log.d(TAG, "await task finished, use time: $time")
         }
 
         override fun allTasksFinished(time: Long) {

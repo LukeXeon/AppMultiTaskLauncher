@@ -9,10 +9,11 @@ open class RemoteTask @JvmOverloads constructor(
     private val path: Uri,
     private val method: String,
     private val args: Bundle? = null,
-    dependencies: List<Class<out Task>> = emptyList()
-) : Task(name, false, dependencies) {
+    isAwait: Boolean = true,
+    dependencies: Set<Class<out Task>> = emptySet()
+) : ActionTask(name, false, isAwait, dependencies) {
 
-    final override suspend fun execute(application: Application) {
+    final override fun run(application: Application) {
         val result = try {
             application.contentResolver.call(path, method, null, args)!!
         } catch (e: Throwable) {
@@ -37,7 +38,6 @@ open class RemoteTask @JvmOverloads constructor(
             }
             else -> throw AssertionError()
         }
-
     }
 
     open fun handleException(throwable: Throwable) {
