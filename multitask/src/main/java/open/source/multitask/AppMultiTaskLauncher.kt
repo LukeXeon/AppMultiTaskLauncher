@@ -98,7 +98,7 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
     }
 
     @MainThread
-    fun addTask(t: Collection<AwaitTask>): AppMultiTaskLauncher {
+    fun addTasks(t: Collection<AwaitTask>): AppMultiTaskLauncher {
         tasks.addAll(t)
         return this
     }
