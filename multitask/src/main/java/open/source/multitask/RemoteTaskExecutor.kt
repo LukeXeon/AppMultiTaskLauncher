@@ -1,5 +1,6 @@
 package open.source.multitask
 
+import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
@@ -16,13 +17,23 @@ abstract class RemoteTaskExecutor : ContentProvider() {
         internal const val RESULT_EXCEPTION = 2
     }
 
-    private val methodLocks by lazy { ArrayMap<String, BooleanArray>() }
+    private val methods = ArrayMap<String, Pair<RemoteMethod, BooleanArray>>()
 
     final override fun onCreate(): Boolean {
         return true
     }
 
-    abstract fun execute(method: String, args: Bundle)
+    protected fun addMethod(name: String, method: RemoteMethod) {
+        synchronized(methods) {
+            if (methods.put(name, method to booleanArrayOf(false)) != null) {
+                throw IllegalArgumentException()
+            }
+        }
+    }
+
+    interface RemoteMethod {
+        fun execute(application: Application, method: String, args: Bundle?)
+    }
 
     final override fun call(
         method: String,
@@ -30,12 +41,16 @@ abstract class RemoteTaskExecutor : ContentProvider() {
         extras: Bundle?
     ): Bundle {
         return try {
-            val lock = synchronized(methodLocks) {
-                methodLocks.getOrPut(method) { booleanArrayOf(false) }
+            val (invoker, lock) = synchronized(methods) {
+                methods.getValue(method)
             }
             synchronized(lock) {
                 if (!lock[0]) {
-                    execute(method, extras ?: Bundle.EMPTY)
+                    invoker.execute(
+                        context!!.applicationContext as Application,
+                        method,
+                        extras
+                    )
                     lock[0] = true
                 }
             }
