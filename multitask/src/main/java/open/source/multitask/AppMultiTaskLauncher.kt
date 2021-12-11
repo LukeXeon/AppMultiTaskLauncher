@@ -63,11 +63,11 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
             val name = action.name
             val start = SystemClock.uptimeMillis()
             if (!internalTasks.contains(name)) {
-                tracker.taskStarted(name)
+                tracker.onTaskStarted(name)
             }
             action.execute(application)
             if (!internalTasks.contains(name)) {
-                tracker.taskFinished(name, SystemClock.uptimeMillis() - start)
+                tracker.onTaskFinished(name, SystemClock.uptimeMillis() - start)
             }
         }
     }
@@ -123,7 +123,7 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
         ) {
             override suspend fun execute(application: Application) {
                 (mainThread.executor as ExecutorService).shutdown()
-                tracker.awaitTasksFinished(SystemClock.uptimeMillis() - start)
+                tracker.onAwaitTasksFinished(SystemClock.uptimeMillis() - start)
             }
         }
         runningTasks[awaitFinishedTask.javaClass] = awaitFinishedTask
@@ -133,7 +133,7 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
         ) {
             override suspend fun execute(application: Application) {
                 (backgroundThread.executor as ExecutorService).shutdown()
-                tracker.allTasksFinished(SystemClock.uptimeMillis() - start)
+                tracker.onAllTasksFinished(SystemClock.uptimeMillis() - start)
             }
         }
         runningTasks[allFinishedTask.javaClass] = allFinishedTask
