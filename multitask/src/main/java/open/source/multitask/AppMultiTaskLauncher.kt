@@ -31,8 +31,9 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
         }
     }
 
-    private val skipTaskNames = Array(2) { UUID.randomUUID().toString() }
-    private val tasks = LinkedList<AwaitTask>()
+    private val internalTasks = Array(2) { UUID.randomUUID().toString() }
+    private val tasks: MutableMap<Class<out AwaitTask>, Task> = ArrayMap()
+    private val awaitDependencies = ArraySet<Class<out Task>>(tasks.size)
     private val mainThread = ExclusiveMainThreadExecutor()
         .asCoroutineDispatcher()
     private val backgroundThread = ScheduledThreadPoolExecutor(
@@ -61,11 +62,11 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
             dependencies.joinAll()
             val name = action.name
             val start = SystemClock.uptimeMillis()
-            if (!skipTaskNames.contains(name)) {
+            if (!internalTasks.contains(name)) {
                 tracker.taskStarted(name)
             }
             action.execute(application)
-            if (!skipTaskNames.contains(name)) {
+            if (!internalTasks.contains(name)) {
                 tracker.taskFinished(name, SystemClock.uptimeMillis() - start)
             }
         }
@@ -93,13 +94,20 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
 
     @MainThread
     fun addTask(task: AwaitTask): AppMultiTaskLauncher {
-        tasks.add(task)
+        if (tasks.put(task.javaClass, task) != null) {
+            throw IllegalArgumentException()
+        }
+        if (task.isAwait) {
+            awaitDependencies.add(task.javaClass)
+        }
         return this
     }
 
     @MainThread
-    fun addTasks(t: Collection<AwaitTask>): AppMultiTaskLauncher {
-        tasks.addAll(t)
+    fun addTasks(tasks: Collection<AwaitTask>): AppMultiTaskLauncher {
+        for (task in tasks) {
+            addTask(task)
+        }
         return this
     }
 
@@ -107,23 +115,10 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
     fun start(application: Application) {
         TraceCompat.beginSection(TAG)
         val start = SystemClock.uptimeMillis()
-        val allTasks: MutableMap<Class<out AwaitTask>, AwaitTask> = ArrayMap(tasks.size)
-        for (task in tasks) {
-            if (allTasks.put(task.javaClass, task) != null) {
-                throw IllegalArgumentException()
-            }
-        }
-        val awaitDependencies = ArraySet<Class<out Task>>(tasks.size)
-        for ((type, task) in allTasks) {
-            if (task.isAwait) {
-                awaitDependencies.add(type)
-            }
-        }
         val runningTasks = ArrayMap<Class<*>, Task>(tasks.size + 2)
-        runningTasks.putAll(allTasks)
+        runningTasks.putAll(tasks)
         val awaitFinishedTask = object : Task(
-            skipTaskNames[0],
-            isMainThread = false,
+            internalTasks[0],
             dependencies = awaitDependencies
         ) {
             override suspend fun execute(application: Application) {
@@ -133,9 +128,8 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
         }
         runningTasks[awaitFinishedTask.javaClass] = awaitFinishedTask
         val allFinishedTask = object : Task(
-            skipTaskNames[1],
-            isMainThread = false,
-            dependencies = allTasks.keys
+            internalTasks[1],
+            dependencies = tasks.keys
         ) {
             override suspend fun execute(application: Application) {
                 (backgroundThread.executor as ExecutorService).shutdown()
