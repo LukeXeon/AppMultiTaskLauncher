@@ -1,3 +1,4 @@
+include ':multitask-ksp'
 include ':multitask'
 include ':app'
 rootProject.name = "startup"

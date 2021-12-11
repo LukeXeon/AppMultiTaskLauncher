@@ -18,8 +18,8 @@
             </intent-filter>
         </activity>
         <provider
-            android:name=".app.AppRemoteTaskExecutor"
-            android:authorities="${applicationId}.remote-task-executor"
+            android:name=".app.WebRemoteTaskExecutor"
+            android:authorities="${applicationId}.remote-task-executor:remote"
             android:exported="false"
             android:process=":remote" />
     </application>
