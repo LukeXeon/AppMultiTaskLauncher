@@ -21,9 +21,10 @@ import kotlin.math.max
 import kotlin.reflect.KClass
 
 class MultiTask @JvmOverloads @MainThread constructor(
+    private val application: Application,
     private val tracker: TaskTracker = TaskTracker.Default,
     private val uncaughtExceptionHandler: RemoteTaskExceptionHandler = RemoteTaskExceptionHandler.Default,
-    private val classLoader: ClassLoader? = MultiTask::class.java.classLoader
+    private val classLoader: ClassLoader? = application.classLoader
 ) {
     companion object {
         private const val TAG = "AppMultiTaskLauncher"
@@ -32,8 +33,10 @@ class MultiTask @JvmOverloads @MainThread constructor(
             return ArrayMap(capacity)
         }
 
+        @JvmStatic
+        @MainThread
         fun start(application: Application) {
-            MultiTask().start(application)
+            MultiTask(application).start()
         }
     }
 
@@ -64,7 +67,6 @@ class MultiTask @JvmOverloads @MainThread constructor(
     ).asCoroutineDispatcher()
 
     private fun startJob(
-        application: Application,
         task: TaskInfo,
         results: MutableMap<String, Parcelable>,
         dependencies: List<Job>
@@ -89,7 +91,6 @@ class MultiTask @JvmOverloads @MainThread constructor(
     }
 
     private fun startJobs(
-        application: Application,
         task: TaskInfo,
         results: MutableMap<String, Parcelable>,
         types: Map<KClass<out TaskExecutor>, TaskInfo>,
@@ -97,14 +98,14 @@ class MultiTask @JvmOverloads @MainThread constructor(
     ): Job {
         return jobs.getOrPut(task) {
             if (task.dependencies.isEmpty()) {
-                startJob(application, task, results, emptyList())
+                startJob(task, results, emptyList())
             } else {
                 val dependenciesJobs = ArrayList<Job>(task.dependencies.size)
                 for (dependencyType in task.dependencies) {
                     val awaitTask = types.getValue(dependencyType)
-                    dependenciesJobs.add(startJobs(application, awaitTask, results, types, jobs))
+                    dependenciesJobs.add(startJobs(awaitTask, results, types, jobs))
                 }
-                startJob(application, task, results, dependenciesJobs)
+                startJob(task, results, dependenciesJobs)
             }
         }
     }
@@ -131,7 +132,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
         }
     }
 
-    fun start(application: Application) {
+    fun start() {
         val start = SystemClock.uptimeMillis()
         backgroundThread.executor.execute {
             TraceCompat.beginSection(TAG)
@@ -202,7 +203,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             val jobs = ArrayMap<TaskInfo, Job>(realTasks.size)
             for (task in realTasks.values) {
                 if (jobs.size < realTasks.size) {
-                    startJobs(application, task, results, realTasks, jobs)
+                    startJobs(task, results, realTasks, jobs)
                 } else {
                     break
                 }
