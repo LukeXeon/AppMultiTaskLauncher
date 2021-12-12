@@ -18,8 +18,12 @@ abstract class TaskInfo(
         if (executor == TaskExecutorType.Remote) {
             RemoteTaskExecutor.Client(process, type, uncaughtExceptionHandler).execute(application)
         } else {
-            newInstance().execute(application)
+            directExecute(application)
         }
+    }
+
+    internal suspend inline fun directExecute(application: Application) {
+        newInstance().execute(application)
     }
 
     protected abstract fun newInstance(): TaskExecutor

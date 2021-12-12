@@ -8,16 +8,17 @@ import android.net.Uri
 import android.os.*
 import androidx.collection.ArrayMap
 import androidx.core.app.BundleCompat
-import kotlinx.coroutines.runBlocking
-import java.util.concurrent.LinkedBlockingQueue
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
+import java.util.*
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ThreadFactory
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
-import kotlin.math.max
 import kotlin.properties.Delegates
 import kotlin.reflect.KClass
 
@@ -26,12 +27,8 @@ open class RemoteTaskExecutor : ContentProvider() {
 
     companion object {
         private const val BINDER_KEY = "binder"
-        private val EXECUTOR = ThreadPoolExecutor(
+        private val DISPATCHER = ScheduledThreadPoolExecutor(
             0,
-            max(4, Runtime.getRuntime().availableProcessors()),
-            10,
-            TimeUnit.SECONDS,
-            LinkedBlockingQueue(),
             object : ThreadFactory {
 
                 private val count = AtomicInteger(0)
@@ -45,18 +42,23 @@ open class RemoteTaskExecutor : ContentProvider() {
                     }
                 }
             }
-        )
+        ).asCoroutineDispatcher()
         private val ALIVE_BINDER = Binder()
     }
 
-    private val tasks = ArrayMap<String, BooleanArray>()
+    private val jobs = ArrayMap<String, Job>()
+    private val serviceLoader by lazy {
+        ServiceLoader.load(TaskInfo::class.java, classLoader)
+    }
+    private val application by lazy {
+        context?.applicationContext as Application
+    }
+    open val classLoader: ClassLoader?
+        get() = javaClass.classLoader
 
     final override fun onCreate(): Boolean {
         return true
     }
-
-    open val classLoader: ClassLoader?
-        get() = javaClass.classLoader
 
     final override fun call(
         method: String,
@@ -68,25 +70,24 @@ open class RemoteTaskExecutor : ContentProvider() {
                 extras ?: throw AssertionError(), BINDER_KEY
             )
         )
-        EXECUTOR.execute {
+        GlobalScope.launch(DISPATCHER) {
             try {
-                val lock = synchronized(tasks) {
-                    tasks.getOrPut(method) {
-                        booleanArrayOf(false)
+                val taskInfo = serviceLoader.find { it.type.qualifiedName == method }
+                    ?: throw ClassNotFoundException("task name \"${method}\" not found !")
+                val job = synchronized(jobs) {
+                    jobs.getOrPut(method) {
+                        launch(DISPATCHER) {
+                            try {
+                                taskInfo.directExecute(application)
+                            } finally {
+                                synchronized(jobs) {
+                                    jobs.remove(method)
+                                }
+                            }
+                        }
                     }
                 }
-                synchronized(lock) {
-                    if (!lock[0]) {
-                        val application = context!!.applicationContext as Application
-                        val executor = Class.forName(method, false, classLoader)
-                            .getDeclaredConstructor()
-                            .apply {
-                                isAccessible = true
-                            }.newInstance() as TaskExecutor
-                        runBlocking { executor.execute(application) }
-                        lock[0] = true
-                    }
-                }
+                job.join()
                 callback.onCompleted()
             } catch (e: Throwable) {
                 callback.onException(RemoteTaskException(e))
