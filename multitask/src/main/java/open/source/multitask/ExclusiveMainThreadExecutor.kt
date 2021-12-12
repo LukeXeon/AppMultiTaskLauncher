@@ -45,7 +45,15 @@ internal class ExclusiveMainThreadExecutor : AbstractExecutorService(),
         override fun run() {
             if (countDownLatch.count > 0) {
                 mainThread.postAtFrontOfQueue(this)
-                queue.poll()?.run()
+                var action = queue.poll()
+                if (action != null) {
+                    action.run()
+                } else {
+                    action = queue.peek()
+                    if (action == null || action.getDelay(TimeUnit.NANOSECONDS) > 0) {
+                        Thread.yield()
+                    }
+                }
             } else {
                 mainThread.removeCallbacks(this)
             }
