@@ -42,7 +42,9 @@ open class RemoteTaskExecutor : ContentProvider() {
                 }
             }
         ).asCoroutineDispatcher()
-        private val ALIVE_BINDER = Binder()
+        private val ALIVE_BINDER = Bundle().apply {
+            BundleCompat.putBinder(this, BINDER_KEY, Binder())
+        }
     }
 
     private val jobs = ArrayMap<String, Deferred<Parcelable?>>()
@@ -102,9 +104,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                 callback.onException(RemoteTaskException(e))
             }
         }
-        return Bundle().apply {
-            BundleCompat.putBinder(this, BINDER_KEY, ALIVE_BINDER)
-        }
+        return ALIVE_BINDER
     }
 
     final override fun query(
