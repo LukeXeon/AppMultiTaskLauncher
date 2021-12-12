@@ -20,7 +20,8 @@ import kotlin.reflect.KClass
 
 class AppMultiTaskLauncher @JvmOverloads constructor(
     private val tracker: TaskTracker = TaskTracker.Default,
-    private val uncaughtExceptionHandler: Thread.UncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, e -> throw e }
+    private val uncaughtExceptionHandler: Thread.UncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, e -> throw e },
+    private val classLoader: ClassLoader? = AppMultiTaskLauncher::class.java.classLoader
 ) {
     companion object {
         private const val TAG = "AppMultiTaskLauncher"
@@ -122,7 +123,7 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
     fun start(application: Application) {
         TraceCompat.beginSection(TAG)
         val start = SystemClock.uptimeMillis()
-        val it = ServiceLoader.load(TaskInfo::class.java, TaskInfo::class.java.classLoader)
+        val it = ServiceLoader.load(TaskInfo::class.java, classLoader)
             .iterator()
         var tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo>? = null
         var awaitDependencies: ArrayList<KClass<out TaskExecutor>>? = null
