@@ -1,19 +1,25 @@
 package open.source.multitask
 
+import android.app.Application
+import open.source.multitask.annotations.TaskExecutorType
 import kotlin.reflect.KClass
 
-internal abstract class TaskInfo(
+abstract class TaskInfo(
     val name: String,
-    val runner: TaskRunnerType = TaskRunnerType.Async,
+    val executor: TaskExecutorType = TaskExecutorType.Async,
     val isAwait: Boolean = true,
     private val process: String = "",
-    val dependencies: List<KClass<out TaskExecutor>>,
+    val dependencies: Collection<KClass<out TaskExecutor>>,
 ) {
-    fun create(): TaskExecutor {
-        if (runner == TaskRunnerType.Remote) {
-            return RemoteTaskExecutor.Client(process, type)
+    internal suspend inline fun execute(
+        application: Application,
+        uncaughtExceptionHandler: Thread.UncaughtExceptionHandler
+    ) {
+        if (executor == TaskExecutorType.Remote) {
+            RemoteTaskExecutor.Client(process, type, uncaughtExceptionHandler).execute(application)
+        } else {
+            newInstance().execute(application)
         }
-        return newInstance()
     }
 
     protected abstract fun newInstance(): TaskExecutor

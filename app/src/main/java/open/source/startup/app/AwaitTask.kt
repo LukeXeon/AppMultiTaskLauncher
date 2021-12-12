@@ -5,8 +5,8 @@ import open.source.multitask.TaskExecutor
 import open.source.multitask.annotations.Task
 import open.source.multitask.annotations.TaskExecutorType
 
-@Task(name = "aaaa", executor = TaskExecutorType.Main)
-class MainTask : TaskExecutor {
+@Task(name = "bbb", executor = TaskExecutorType.Async, dependencies = [MainTask::class])
+class AwaitTask : TaskExecutor {
     override suspend fun execute(application: Application) {
     }
 }

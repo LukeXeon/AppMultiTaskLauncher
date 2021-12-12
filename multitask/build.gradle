@@ -37,6 +37,8 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     implementation 'androidx.appcompat:appcompat:1.1.0'
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.4.3"
+    api project(":multitask-annotations")
+    api 'com.google.auto.service:auto-service-annotations:1.0.1'
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.4.3"
     testImplementation 'junit:junit:4.+'
     androidTestImplementation 'androidx.test.ext:junit:1.1.1'

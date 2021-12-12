@@ -46,6 +46,8 @@ internal class ExclusiveMainThreadExecutor : AbstractExecutorService(),
             if (countDownLatch.count > 0) {
                 mainThread.postAtFrontOfQueue(this)
                 queue.poll()?.run()
+            } else {
+                mainThread.removeCallbacks(this)
             }
         }
     }

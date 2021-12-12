@@ -5,19 +5,48 @@ import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
-import android.os.Bundle
+import android.os.*
 import androidx.collection.ArrayMap
+import androidx.core.app.BundleCompat
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
+import kotlin.math.max
+import kotlin.properties.Delegates
 import kotlin.reflect.KClass
 
 
 open class RemoteTaskExecutor : ContentProvider() {
 
     companion object {
-        private const val CODE_KEY = "code"
-        private const val EXCEPTION_KEY = "exception"
-        private const val RESULT_OK = 1
-        private const val RESULT_EXCEPTION = 2
+        private const val BINDER_KEY = "binder"
+        private val EXECUTOR = ThreadPoolExecutor(
+            0,
+            max(4, Runtime.getRuntime().availableProcessors()),
+            10,
+            TimeUnit.SECONDS,
+            LinkedBlockingQueue(),
+            object : ThreadFactory {
+
+                private val count = AtomicInteger(0)
+
+                override fun newThread(r: Runnable): Thread {
+                    return object : Thread("startup-remote-" + count.getAndIncrement()) {
+                        override fun run() {
+                            Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
+                            r.run()
+                        }
+                    }
+                }
+            }
+        )
+        private val ALIVE_BINDER = Binder()
     }
 
     private val tasks = ArrayMap<String, BooleanArray>()
@@ -26,36 +55,45 @@ open class RemoteTaskExecutor : ContentProvider() {
         return true
     }
 
+    open val classLoader: ClassLoader?
+        get() = javaClass.classLoader
+
     final override fun call(
         method: String,
         arg: String?,
         extras: Bundle?
     ): Bundle {
-        return try {
-            val lock = synchronized(tasks) {
-                tasks.getOrPut(method) {
-                    booleanArrayOf(false)
+        val callback = IRemoteTaskCallback.Stub.asInterface(
+            BundleCompat.getBinder(
+                extras ?: throw AssertionError(), BINDER_KEY
+            )
+        )
+        EXECUTOR.execute {
+            try {
+                val lock = synchronized(tasks) {
+                    tasks.getOrPut(method) {
+                        booleanArrayOf(false)
+                    }
                 }
-            }
-            synchronized(lock) {
-                if (!lock[0]) {
-                    val application = context!!.applicationContext as Application
-                    val executor = Class.forName(method).getDeclaredConstructor()
-                        .apply {
-                            isAccessible = true
-                        }.newInstance() as TaskExecutor
-                    runBlocking { executor.execute(application) }
-                    lock[0] = true
+                synchronized(lock) {
+                    if (!lock[0]) {
+                        val application = context!!.applicationContext as Application
+                        val executor = Class.forName(method, false, classLoader)
+                            .getDeclaredConstructor()
+                            .apply {
+                                isAccessible = true
+                            }.newInstance() as TaskExecutor
+                        runBlocking { executor.execute(application) }
+                        lock[0] = true
+                    }
                 }
+                callback.onCompleted()
+            } catch (e: Throwable) {
+                callback.onException(RemoteTaskException(e))
             }
-            Bundle().apply {
-                putInt(CODE_KEY, RESULT_OK)
-            }
-        } catch (e: Throwable) {
-            Bundle().apply {
-                putInt(CODE_KEY, RESULT_EXCEPTION)
-                putParcelable(EXCEPTION_KEY, RemoteTaskException(e))
-            }
+        }
+        return Bundle().apply {
+            BundleCompat.putBinder(this, BINDER_KEY, ALIVE_BINDER)
         }
     }
 
@@ -90,42 +128,49 @@ open class RemoteTaskExecutor : ContentProvider() {
     internal class Client(
         private val process: String,
         private val type: KClass<out TaskExecutor>,
+        private val uncaughtExceptionHandler: Thread.UncaughtExceptionHandler
     ) : TaskExecutor {
 
         override suspend fun execute(application: Application) {
-            val result = try {
-                application.contentResolver.call(
-                    Uri.parse("content://${application.packageName}.remote-task-executor${process}"),
-                    type.qualifiedName!!,
-                    null,
-                    null
-                )!!
+            try {
+                suspendCoroutine<Unit> { continuation ->
+                    var binder by Delegates.notNull<IBinder>()
+                    val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
+                        override fun onCompleted() {
+                            binder.unlinkToDeath(this, 0)
+                            continuation.resume(Unit)
+                        }
+
+                        override fun onException(ex: RemoteTaskException) {
+                            binder.unlinkToDeath(this, 0)
+                            continuation.resumeWithException(ex)
+                        }
+
+                        override fun binderDied() {
+                            continuation.resumeWithException(DeadObjectException())
+                        }
+                    }
+                    val bundle = Bundle()
+                    BundleCompat.putBinder(bundle, BINDER_KEY, callback)
+                    val result = application.contentResolver.call(
+                        Uri.parse("content://${application.packageName}.remote-task-executor${process}"),
+                        type.qualifiedName ?: throw AssertionError(),
+                        null,
+                        bundle
+                    ) ?: throw AssertionError()
+                    binder = BundleCompat.getBinder(result, BINDER_KEY)
+                        ?: throw AssertionError()
+                    binder.linkToDeath(callback, 0)
+                }
             } catch (e: Throwable) {
                 handleException(e)
                 return
             }
-            result.classLoader = RemoteTaskException::class.java.classLoader
-            val code = try {
-                result.getInt(CODE_KEY)
-            } catch (e: Throwable) {
-                handleException(e)
-            }
-            when (code) {
-                RESULT_OK -> {
-                    return
-                }
-                RESULT_EXCEPTION -> {
-                    val exception = result.getParcelable<RemoteTaskException>(
-                        EXCEPTION_KEY
-                    )!!
-                    handleException(exception)
-                }
-                else -> throw AssertionError()
-            }
+
         }
 
-        private fun handleException(throwable: Throwable) {
-            throw throwable
+        private fun handleException(e: Throwable) {
+            uncaughtExceptionHandler.uncaughtException(Thread.currentThread(), e)
         }
     }
 

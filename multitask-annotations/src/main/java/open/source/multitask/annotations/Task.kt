@@ -1,4 +1,4 @@
-package open.source.multitask
+package open.source.multitask.annotations
 
 import kotlin.reflect.KClass
 
@@ -6,8 +6,8 @@ import kotlin.reflect.KClass
 @Retention(AnnotationRetention.BINARY)
 annotation class Task(
     val name: String,
-    val runner: TaskRunnerType = TaskRunnerType.Async,
+    val executor: TaskExecutorType = TaskExecutorType.Async,
     val isAwait: Boolean = true,
     val process: String = "",
-    val dependencies: Array<KClass<out TaskExecutor>> = []
+    val dependencies: Array<KClass<*>> = []
 )
