@@ -1,6 +1,7 @@
 package open.source.multitask
 
 import android.app.Application
+import android.os.Parcelable
 import android.os.Process
 import android.os.SystemClock
 import androidx.annotation.MainThread
@@ -9,6 +10,7 @@ import androidx.core.os.TraceCompat
 import kotlinx.coroutines.*
 import open.source.multitask.annotations.TaskExecutorType
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ThreadFactory
@@ -20,7 +22,7 @@ import kotlin.reflect.KClass
 
 class AppMultiTaskLauncher @JvmOverloads constructor(
     private val tracker: TaskTracker = TaskTracker.Default,
-    private val uncaughtExceptionHandler: Thread.UncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, e -> throw e },
+    private val uncaughtExceptionHandler: RemoteTaskExceptionHandler = RemoteTaskExceptionHandler.Default,
     private val classLoader: ClassLoader? = AppMultiTaskLauncher::class.java.classLoader
 ) {
     companion object {
@@ -60,6 +62,7 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
     private fun startJob(
         application: Application,
         task: TaskInfo,
+        results: MutableMap<String, Parcelable>,
         dependencies: List<Job>
     ): Job {
         return GlobalScope.launch(if (task.executor == TaskExecutorType.Main) mainThread else backgroundThread) {
@@ -69,10 +72,14 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
                 tracker.onTaskStarted(name)
             }
             val start = SystemClock.uptimeMillis()
-            task.execute(application, uncaughtExceptionHandler)
+            val result = task.execute(application, results, uncaughtExceptionHandler)
             val time = SystemClock.uptimeMillis() - start
             if (!internalTasks.contains(task.type)) {
                 tracker.onTaskFinished(name, time)
+            }
+            val key = task.type.qualifiedName
+            if (result != null && !key.isNullOrEmpty()) {
+                results[key] = result
             }
         }
     }
@@ -80,19 +87,20 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
     private fun startJobs(
         application: Application,
         task: TaskInfo,
+        results: MutableMap<String, Parcelable>,
         types: Map<KClass<out TaskExecutor>, TaskInfo>,
         jobs: MutableMap<TaskInfo, Job>
     ): Job {
         return jobs.getOrPut(task) {
             if (task.dependencies.isEmpty()) {
-                startJob(application, task, emptyList())
+                startJob(application, task, results, emptyList())
             } else {
                 val dependenciesJobs = ArrayList<Job>(task.dependencies.size)
                 for (dependencyType in task.dependencies) {
                     val awaitTask = types.getValue(dependencyType)
-                    dependenciesJobs.add(startJobs(application, awaitTask, types, jobs))
+                    dependenciesJobs.add(startJobs(application, awaitTask, results, types, jobs))
                 }
-                startJob(application, task, dependenciesJobs)
+                startJob(application, task, results, dependenciesJobs)
             }
         }
     }
@@ -107,14 +115,14 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
         tracker.onAllTasksFinished(time)
     }
 
-    internal inner class AwaitTaskFinished(private val start: Long) : TaskExecutor {
-        override suspend fun execute(application: Application) {
+    internal inner class AwaitTaskFinished(private val start: Long) : ActionTaskExecutor() {
+        override fun run(application: Application) {
             awaitTasksFinished(SystemClock.uptimeMillis() - start)
         }
     }
 
-    internal inner class AllTaskFinished(private val start: Long) : TaskExecutor {
-        override suspend fun execute(application: Application) {
+    internal inner class AllTaskFinished(private val start: Long) : ActionTaskExecutor() {
+        override fun run(application: Application) {
             allTasksFinished(SystemClock.uptimeMillis() - start)
         }
     }
@@ -184,11 +192,11 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
 
         }
         realTasks[allFinishedTask.type] = allFinishedTask
-
+        val results = ConcurrentHashMap<String, Parcelable>(realTasks.size)
         val jobs = ArrayMap<TaskInfo, Job>(realTasks.size)
         for (task in realTasks.values) {
             if (jobs.size < realTasks.size) {
-                startJobs(application, task, realTasks, jobs)
+                startJobs(application, task, results, realTasks, jobs)
             } else {
                 break
             }

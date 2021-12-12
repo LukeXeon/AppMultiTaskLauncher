@@ -8,10 +8,8 @@ import android.net.Uri
 import android.os.*
 import androidx.collection.ArrayMap
 import androidx.core.app.BundleCompat
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
+import java.lang.Runnable
 import java.util.*
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ThreadFactory
@@ -27,6 +25,7 @@ open class RemoteTaskExecutor : ContentProvider() {
 
     companion object {
         private const val BINDER_KEY = "binder"
+        private const val ARGS_KEY = "args"
         private val DISPATCHER = ScheduledThreadPoolExecutor(
             0,
             object : ThreadFactory {
@@ -46,7 +45,7 @@ open class RemoteTaskExecutor : ContentProvider() {
         private val ALIVE_BINDER = Binder()
     }
 
-    private val jobs = ArrayMap<String, Job>()
+    private val jobs = ArrayMap<String, Deferred<Parcelable?>>()
     private val serviceLoader by lazy {
         ServiceLoader.load(TaskInfo::class.java, classLoader)
     }
@@ -72,14 +71,25 @@ open class RemoteTaskExecutor : ContentProvider() {
         )
         GlobalScope.launch(DISPATCHER) {
             try {
+                val args = extras.getBundle(ARGS_KEY)
+                val results = if (args == null || args.isEmpty) {
+                    emptyMap()
+                } else {
+                    ArrayMap<String, Parcelable>(args.size()).apply {
+                        for (k in args.keySet()) {
+                            this[k] = args.getParcelable(k)
+                        }
+                    }
+                }
                 val taskInfo = serviceLoader.find { it.type.qualifiedName == method }
                     ?: throw ClassNotFoundException("task name \"${method}\" not found !")
                 val job = synchronized(jobs) {
                     jobs.getOrPut(method) {
-                        launch(DISPATCHER) {
+                        async(DISPATCHER) {
                             try {
-                                taskInfo.directExecute(application)
+                                return@async taskInfo.directExecute(application, results)
                             } finally {
+                                @Suppress("DeferredResultUnused")
                                 synchronized(jobs) {
                                     jobs.remove(method)
                                 }
@@ -87,8 +97,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                         }
                     }
                 }
-                job.join()
-                callback.onCompleted()
+                callback.onCompleted(RemoteTaskResult(job.await()))
             } catch (e: Throwable) {
                 callback.onException(RemoteTaskException(e))
             }
@@ -129,17 +138,21 @@ open class RemoteTaskExecutor : ContentProvider() {
     internal class Client(
         private val process: String,
         private val type: KClass<out TaskExecutor>,
-        private val uncaughtExceptionHandler: Thread.UncaughtExceptionHandler
+        private val uncaughtExceptionHandler: RemoteTaskExceptionHandler
     ) : TaskExecutor {
 
-        override suspend fun execute(application: Application) {
+        override suspend fun execute(
+            application: Application,
+            results: Map<String, Parcelable>
+        ): Parcelable? {
             try {
-                suspendCoroutine<Unit> { continuation ->
+                return suspendCoroutine { continuation ->
                     var binder by Delegates.notNull<IBinder>()
                     val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
-                        override fun onCompleted() {
+
+                        override fun onCompleted(reult: RemoteTaskResult) {
                             binder.unlinkToDeath(this, 0)
-                            continuation.resume(Unit)
+                            continuation.resume(reult.value)
                         }
 
                         override fun onException(ex: RemoteTaskException) {
@@ -152,7 +165,12 @@ open class RemoteTaskExecutor : ContentProvider() {
                         }
                     }
                     val bundle = Bundle()
+                    val args = Bundle()
+                    for ((k, v) in results) {
+                        args.putParcelable(k, v)
+                    }
                     BundleCompat.putBinder(bundle, BINDER_KEY, callback)
+                    bundle.putBundle(ARGS_KEY, args)
                     val result = application.contentResolver.call(
                         Uri.parse("content://${application.packageName}.remote-task-executor${process}"),
                         type.qualifiedName ?: throw AssertionError(),
@@ -164,14 +182,8 @@ open class RemoteTaskExecutor : ContentProvider() {
                     binder.linkToDeath(callback, 0)
                 }
             } catch (e: Throwable) {
-                handleException(e)
-                return
+                return uncaughtExceptionHandler.handleException(e)
             }
-
-        }
-
-        private fun handleException(e: Throwable) {
-            uncaughtExceptionHandler.uncaughtException(Thread.currentThread(), e)
         }
     }
 

@@ -1,6 +1,8 @@
 package open.source.multitask
 
 import android.app.Application
+import android.content.ComponentName
+import android.os.Parcelable
 import open.source.multitask.annotations.TaskExecutorType
 import kotlin.reflect.KClass
 
@@ -13,17 +15,22 @@ abstract class TaskInfo(
 ) {
     internal suspend inline fun execute(
         application: Application,
-        uncaughtExceptionHandler: Thread.UncaughtExceptionHandler
-    ) {
-        if (executor == TaskExecutorType.Remote) {
-            RemoteTaskExecutor.Client(process, type, uncaughtExceptionHandler).execute(application)
+        results: Map<String, Parcelable>,
+        uncaughtExceptionHandler: RemoteTaskExceptionHandler
+    ): Parcelable? {
+        return if (executor == TaskExecutorType.Remote) {
+            RemoteTaskExecutor.Client(process, type, uncaughtExceptionHandler)
+                .execute(application, results)
         } else {
-            directExecute(application)
+            directExecute(application, results)
         }
     }
 
-    internal suspend inline fun directExecute(application: Application) {
-        newInstance().execute(application)
+    internal suspend inline fun directExecute(
+        application: Application,
+        results: Map<String, Parcelable>
+    ): Parcelable? {
+        return newInstance().execute(application, results)
     }
 
     protected abstract fun newInstance(): TaskExecutor
