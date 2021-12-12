@@ -82,9 +82,8 @@ class TaskInfoProcessor : AbstractProcessor() {
         }
         val newServices = ArrayList<String>()
         for (task in tasks) {
-            val uuid = UUID.randomUUID().toString().replace('-', '_')
             val packageName = elementUtils.getPackageOf(task.type).qualifiedName
-            val name = "${task.type.simpleName}_TaskInfo_${uuid}"
+            val name = "${task.type.simpleName}_TaskInfo_Hash${task.name.hashCode()}"
             if (packageName.isNullOrEmpty()) {
                 newServices.add(name)
             } else {
