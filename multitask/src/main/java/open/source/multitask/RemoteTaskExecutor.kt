@@ -73,16 +73,8 @@ open class RemoteTaskExecutor : ContentProvider() {
         )
         GlobalScope.launch(DISPATCHER) {
             try {
-                val args = extras.getBundle(ARGS_KEY)
-                val results = if (args == null || args.isEmpty) {
-                    emptyMap()
-                } else {
-                    ArrayMap<String, Parcelable>(args.size()).apply {
-                        for (k in args.keySet()) {
-                            this[k] = args.getParcelable(k)
-                        }
-                    }
-                }
+                val args = extras.getBundle(ARGS_KEY) ?: throw AssertionError()
+                val results = FromBundleMap(args)
                 val taskInfo = serviceLoader.find { it.type.qualifiedName == method }
                     ?: throw ClassNotFoundException("task name \"${method}\" not found !")
                 val job = synchronized(jobs) {

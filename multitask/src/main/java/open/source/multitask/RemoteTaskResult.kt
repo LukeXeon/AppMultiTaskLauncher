@@ -3,7 +3,7 @@ package open.source.multitask
 import android.os.Parcel
 import android.os.Parcelable
 
-class RemoteTaskResult(val value: Parcelable?) : Parcelable {
+internal class RemoteTaskResult(val value: Parcelable?) : Parcelable {
 
     private constructor(parcel: Parcel, classLoader: ClassLoader?) : this(
         parcel.readParcelable<Parcelable>(
