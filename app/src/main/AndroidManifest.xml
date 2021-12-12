@@ -3,7 +3,7 @@
     package="open.source.startup">
 
     <application
-        android:name=".app.ApplicationX"
+        android:name="open.source.multitask.MultiTaskApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

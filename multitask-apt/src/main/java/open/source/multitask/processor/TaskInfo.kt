@@ -7,7 +7,6 @@ data class TaskInfo(
     val type: TypeElement,
     val name: String,
     val executor: TaskExecutorType,
-    val isAwait: Boolean,
     val process: String,
     val dependencies: List<TypeElement>
 )

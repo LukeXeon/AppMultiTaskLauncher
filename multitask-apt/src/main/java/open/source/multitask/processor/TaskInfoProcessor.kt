@@ -108,8 +108,7 @@ class TaskInfoProcessor : AbstractProcessor() {
                     .addSuperclassConstructorParameter(
                         "name = \"${task.name}\", " +
                                 "executor = ${task.executor.javaClass.name + '.' + task.executor.name}, " +
-                                "isAwait = ${task.isAwait}, " +
-                                "process = \"${if (task.executor == TaskExecutorType.Remote) task.process else ""}\", " +
+                                "process = \"${if (task.executor == TaskExecutorType.RemoteAsync) task.process else ""}\", " +
                                 "dependencies = setOf(${
                                     task.dependencies.joinToString { "${it.qualifiedName}::class" }
                                 })"
@@ -197,9 +196,6 @@ class TaskInfoProcessor : AbstractProcessor() {
             val annotationMirror = typeElement.getAnnotationMirror(Task::class.java)
             val name = annotationMirror
                 .getAnnotationStringValue(Task::name.name)
-            val isAwait = annotationMirror
-                .getAnnotationValue(Task::isAwait.name)
-                .value == true
             val process = annotationMirror
                 .getAnnotationStringValue(Task::process.name)
             val executorType = annotationMirror
@@ -213,7 +209,6 @@ class TaskInfoProcessor : AbstractProcessor() {
                 type = typeElement,
                 name = name,
                 executor = executorType,
-                isAwait = isAwait,
                 process = process,
                 dependencies = dependencies
             )

@@ -1,7 +1,6 @@
 package open.source.multitask
 
 import android.app.Application
-import android.content.ComponentName
 import android.os.Parcelable
 import open.source.multitask.annotations.TaskExecutorType
 import kotlin.reflect.KClass
@@ -9,7 +8,6 @@ import kotlin.reflect.KClass
 abstract class TaskInfo(
     val name: String,
     val executor: TaskExecutorType = TaskExecutorType.Async,
-    val isAwait: Boolean = true,
     private val process: String = "",
     val dependencies: Collection<KClass<out TaskExecutor>>,
 ) {
@@ -18,7 +16,7 @@ abstract class TaskInfo(
         results: Map<String, Parcelable>,
         uncaughtExceptionHandler: RemoteTaskExceptionHandler
     ): Parcelable? {
-        return if (executor == TaskExecutorType.Remote) {
+        return if (executor == TaskExecutorType.RemoteAsync) {
             RemoteTaskExecutor.Client(process, type, uncaughtExceptionHandler)
                 .execute(application, results)
         } else {

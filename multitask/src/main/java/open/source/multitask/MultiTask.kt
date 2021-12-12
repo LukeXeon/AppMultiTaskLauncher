@@ -20,16 +20,20 @@ import kotlin.collections.ArrayList
 import kotlin.math.max
 import kotlin.reflect.KClass
 
-class AppMultiTaskLauncher @JvmOverloads constructor(
+class MultiTask @JvmOverloads @MainThread constructor(
     private val tracker: TaskTracker = TaskTracker.Default,
     private val uncaughtExceptionHandler: RemoteTaskExceptionHandler = RemoteTaskExceptionHandler.Default,
-    private val classLoader: ClassLoader? = AppMultiTaskLauncher::class.java.classLoader
+    private val classLoader: ClassLoader? = MultiTask::class.java.classLoader
 ) {
     companion object {
         private const val TAG = "AppMultiTaskLauncher"
         private val REENTRY_CHECK = AtomicBoolean()
         private fun <K, V> createMap(capacity: Int): MutableMap<K, V> {
             return ArrayMap(capacity)
+        }
+
+        fun start(application: Application) {
+            MultiTask().start(application)
         }
     }
 
@@ -127,81 +131,84 @@ class AppMultiTaskLauncher @JvmOverloads constructor(
         }
     }
 
-    @MainThread
     fun start(application: Application) {
-        TraceCompat.beginSection(TAG)
         val start = SystemClock.uptimeMillis()
-        val it = ServiceLoader.load(TaskInfo::class.java, classLoader)
-            .iterator()
-        var tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo>? = null
-        var awaitDependencies: ArrayList<KClass<out TaskExecutor>>? = null
-        while (it.hasNext()) {
-            if (tasks == null) {
-                tasks = createMap(128)
-            }
-            val task = it.next()
-            tasks[task.type] = task
-            if (task.isAwait) {
-                if (awaitDependencies == null) {
-                    awaitDependencies = ArrayList(128)
+        backgroundThread.executor.execute {
+            TraceCompat.beginSection(TAG)
+            val it = ServiceLoader.load(TaskInfo::class.java, classLoader)
+                .iterator()
+            var tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo>? = null
+            var awaitDependencies: ArrayList<KClass<out TaskExecutor>>? = null
+            while (it.hasNext()) {
+                if (tasks == null) {
+                    tasks = createMap(128)
                 }
-                awaitDependencies.add(task.type)
+                val task = it.next()
+                tasks[task.type] = task
+                if (task.executor == TaskExecutorType.Main
+                    || task.executor == TaskExecutorType.Await
+                    || task.executor == TaskExecutorType.RemoteAwait
+                ) {
+                    if (awaitDependencies == null) {
+                        awaitDependencies = ArrayList(128)
+                    }
+                    awaitDependencies.add(task.type)
+                }
             }
-        }
 
-        if (tasks == null || tasks.isEmpty()) {
-            val time = SystemClock.uptimeMillis() - start
-            awaitTasksFinished(time)
-            allTasksFinished(time)
-            return
-        }
-        val realTasks = createMap<KClass<out TaskExecutor>, TaskInfo>(
-            tasks.size + internalTasks.size
-        )
-        realTasks.putAll(tasks)
+            if (tasks == null || tasks.isEmpty()) {
+                val time = SystemClock.uptimeMillis() - start
+                awaitTasksFinished(time)
+                allTasksFinished(time)
+                return@execute
+            }
+            val realTasks = createMap<KClass<out TaskExecutor>, TaskInfo>(
+                tasks.size + internalTasks.size
+            )
+            realTasks.putAll(tasks)
 
-        if (!awaitDependencies.isNullOrEmpty()) {
-            val awaitFinishedTask = object : TaskInfo(
-                name = AwaitTaskFinished::class.qualifiedName!!,
-                executor = TaskExecutorType.Main,
-                dependencies = awaitDependencies
+            if (!awaitDependencies.isNullOrEmpty()) {
+                val awaitFinishedTask = object : TaskInfo(
+                    name = AwaitTaskFinished::class.qualifiedName!!,
+                    dependencies = awaitDependencies
+                ) {
+                    override fun newInstance(): TaskExecutor {
+                        return AwaitTaskFinished(start)
+                    }
+
+                    override val type: KClass<out TaskExecutor>
+                        get() = AwaitTaskFinished::class
+
+                }
+                realTasks[awaitFinishedTask.type] = awaitFinishedTask
+            } else {
+                awaitTasksFinished(SystemClock.uptimeMillis() - start)
+            }
+
+            val allFinishedTask = object : TaskInfo(
+                name = AllTaskFinished::class.qualifiedName!!,
+                dependencies = tasks.keys
             ) {
                 override fun newInstance(): TaskExecutor {
-                    return AwaitTaskFinished(start)
+                    return AllTaskFinished(start)
                 }
 
                 override val type: KClass<out TaskExecutor>
-                    get() = AwaitTaskFinished::class
+                    get() = AllTaskFinished::class
 
             }
-            realTasks[awaitFinishedTask.type] = awaitFinishedTask
-        } else {
-            awaitTasksFinished(SystemClock.uptimeMillis() - start)
-        }
-
-        val allFinishedTask = object : TaskInfo(
-            name = AllTaskFinished::class.qualifiedName!!,
-            dependencies = tasks.keys
-        ) {
-            override fun newInstance(): TaskExecutor {
-                return AllTaskFinished(start)
+            realTasks[allFinishedTask.type] = allFinishedTask
+            val results = ConcurrentHashMap<String, Parcelable>(realTasks.size)
+            val jobs = ArrayMap<TaskInfo, Job>(realTasks.size)
+            for (task in realTasks.values) {
+                if (jobs.size < realTasks.size) {
+                    startJobs(application, task, results, realTasks, jobs)
+                } else {
+                    break
+                }
             }
-
-            override val type: KClass<out TaskExecutor>
-                get() = AllTaskFinished::class
-
+            TraceCompat.endSection()
         }
-        realTasks[allFinishedTask.type] = allFinishedTask
-        val results = ConcurrentHashMap<String, Parcelable>(realTasks.size)
-        val jobs = ArrayMap<TaskInfo, Job>(realTasks.size)
-        for (task in realTasks.values) {
-            if (jobs.size < realTasks.size) {
-                startJobs(application, task, results, realTasks, jobs)
-            } else {
-                break
-            }
-        }
-        TraceCompat.endSection()
     }
 
 }
