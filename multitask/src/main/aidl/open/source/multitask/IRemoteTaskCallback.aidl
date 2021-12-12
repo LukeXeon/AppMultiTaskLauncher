@@ -6,7 +6,7 @@ import open.source.multitask.RemoteTaskResult;
 // Declare any non-default types here with import statements
 
 interface IRemoteTaskCallback {
-    void onCompleted(in RemoteTaskResult reult);
+    void onCompleted(in RemoteTaskResult result);
 
     void onException(in RemoteTaskException ex);
 }

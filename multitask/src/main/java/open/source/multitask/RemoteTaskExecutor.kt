@@ -150,9 +150,9 @@ open class RemoteTaskExecutor : ContentProvider() {
                     var binder by Delegates.notNull<IBinder>()
                     val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
 
-                        override fun onCompleted(reult: RemoteTaskResult) {
+                        override fun onCompleted(result: RemoteTaskResult) {
                             binder.unlinkToDeath(this, 0)
-                            continuation.resume(reult.value)
+                            continuation.resume(result.value)
                         }
 
                         override fun onException(ex: RemoteTaskException) {
