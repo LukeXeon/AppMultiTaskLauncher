@@ -65,32 +65,26 @@ open class RemoteTaskExecutor : ContentProvider() {
         method: String,
         arg: String?,
         extras: Bundle?
-    ): Bundle {
-        val callback = IRemoteTaskCallback.Stub.asInterface(
-            BundleCompat.getBinder(
-                extras ?: throw AssertionError(), BINDER_KEY
-            )
-        )
+    ): Bundle? {
+        extras ?: return null
+        val args = extras.getBundle(ARGS_KEY) ?: return null
+        val callback = IRemoteTaskCallback.Stub
+            .asInterface(BundleCompat.getBinder(extras, BINDER_KEY))
+        val results = FromBundleMap(args)
+        serviceLoader.find { it.type.qualifiedName == method } ?: return null
+        val taskInfo = serviceLoader.find { it.type.qualifiedName == method } ?: return null
+        val job = synchronized(jobs) {
+            var job = jobs[method]
+            if (job == null || job.isCancelled) {
+                job = GlobalScope.async(DISPATCHER) {
+                    taskInfo.directExecute(application, results)
+                }
+                jobs[method] = job
+            }
+            return@synchronized job
+        }
         GlobalScope.launch(DISPATCHER) {
             try {
-                val args = extras.getBundle(ARGS_KEY) ?: throw AssertionError()
-                val results = FromBundleMap(args)
-                val taskInfo = serviceLoader.find { it.type.qualifiedName == method }
-                    ?: throw ClassNotFoundException("task name \"${method}\" not found !")
-                val job = synchronized(jobs) {
-                    jobs.getOrPut(method) {
-                        async(DISPATCHER) {
-                            try {
-                                return@async taskInfo.directExecute(application, results)
-                            } finally {
-                                @Suppress("DeferredResultUnused")
-                                synchronized(jobs) {
-                                    jobs.remove(method)
-                                }
-                            }
-                        }
-                    }
-                }
                 callback.onCompleted(RemoteTaskResult(job.await()))
             } catch (e: Throwable) {
                 callback.onException(RemoteTaskException(e))
@@ -168,7 +162,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                         type.qualifiedName ?: throw AssertionError(),
                         null,
                         bundle
-                    ) ?: throw AssertionError()
+                    )!!
                     binder = BundleCompat.getBinder(result, BINDER_KEY)
                         ?: throw AssertionError()
                     binder.linkToDeath(callback, 0)
