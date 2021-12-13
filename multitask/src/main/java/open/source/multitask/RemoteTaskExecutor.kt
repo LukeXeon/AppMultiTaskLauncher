@@ -12,6 +12,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -134,21 +135,27 @@ open class RemoteTaskExecutor : ContentProvider() {
         ): Parcelable? {
             return suspendCoroutine { continuation ->
                 var binder by Delegates.notNull<IBinder>()
+                val isCompleted = AtomicBoolean()
                 val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
 
                     override fun onCompleted(result: RemoteTaskResult) {
-                        runCatching { binder.unlinkToDeath(this, 0) }
-                        runCatching { continuation.resume(result.value) }
+                        if (isCompleted.compareAndSet(false, true)) {
+                            runCatching { binder.unlinkToDeath(this, 0) }
+                            continuation.resume(result.value)
+                        }
                     }
 
                     override fun onException(ex: RemoteTaskException) {
-                        runCatching { binder.unlinkToDeath(this, 0) }
-                        runCatching { continuation.resumeWithException(ex) }
-
+                        if (isCompleted.compareAndSet(false, true)) {
+                            runCatching { binder.unlinkToDeath(this, 0) }
+                            continuation.resumeWithException(ex)
+                        }
                     }
 
                     override fun binderDied() {
-                        runCatching { continuation.resumeWithException(DeadObjectException()) }
+                        if (isCompleted.compareAndSet(false, true)) {
+                            continuation.resumeWithException(DeadObjectException())
+                        }
                     }
                 }
                 val bundle = Bundle()
@@ -164,9 +171,10 @@ open class RemoteTaskExecutor : ContentProvider() {
                     null,
                     bundle
                 )!!
-                binder = BundleCompat.getBinder(result, BINDER_KEY)
-                    ?: throw AssertionError()
-                binder.linkToDeath(callback, 0)
+                binder = BundleCompat.getBinder(result, BINDER_KEY) ?: throw AssertionError()
+                if (!isCompleted.get()) {
+                    binder.linkToDeath(callback, 0)
+                }
             }
         }
     }
