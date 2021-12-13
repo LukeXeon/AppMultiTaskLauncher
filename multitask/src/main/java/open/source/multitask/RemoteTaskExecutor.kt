@@ -137,23 +137,17 @@ open class RemoteTaskExecutor : ContentProvider() {
                 val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
 
                     override fun onCompleted(result: RemoteTaskResult) {
-                        try {
-                            binder.unlinkToDeath(this, 0)
-                        } finally {
-                            continuation.resume(result.value)
-                        }
+                        runCatching { binder.unlinkToDeath(this, 0) }
+                        runCatching { continuation.resume(result.value) }
                     }
 
                     override fun onException(ex: RemoteTaskException) {
-                        try {
-                            binder.unlinkToDeath(this, 0)
-                        } finally {
-                            continuation.resumeWithException(ex)
-                        }
+                        runCatching { binder.unlinkToDeath(this, 0) }
+
                     }
 
                     override fun binderDied() {
-                        continuation.resumeWithException(DeadObjectException())
+                        runCatching { continuation.resumeWithException(DeadObjectException()) }
                     }
                 }
                 val bundle = Bundle()
