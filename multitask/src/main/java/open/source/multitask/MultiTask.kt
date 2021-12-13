@@ -98,7 +98,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     private fun startJob(
         task: TaskInfo,
-        resultsMap: MutableMap<String, Parcelable?>,
+        resultsMap: MutableMap<String, Parcelable>,
         results: TaskResults,
         dependencies: List<Job>
     ): Job {
@@ -125,7 +125,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             }
             val key = task.type.qualifiedName
             if (!key.isNullOrEmpty()) {
-                resultsMap[key] = result
+                resultsMap[key] = result ?: NullMarker
             }
         }
     }
@@ -164,7 +164,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
     private fun startByTopologicalSort(graph: Map<KClass<out TaskExecutor>, TaskInfo>) {
         val unmarked = ArrayList<TaskInfo>(graph.size)
         val temporaryMarked = ArraySet<TaskInfo>(graph.size)
-        val resultsMap = ConcurrentHashMap<String, Parcelable?>(graph.size)
+        val resultsMap = ConcurrentHashMap<String, Parcelable>(graph.size)
         val results = MapTaskResults(resultsMap)
         // sorted list modify to map ↓
         val jobs = ArrayMap<KClass<out TaskExecutor>, Job>(graph.size)

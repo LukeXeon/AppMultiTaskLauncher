@@ -4,7 +4,7 @@ import android.os.Bundle
 import android.os.Parcelable
 
 internal class BundleTaskResults(private val bundle: Bundle) : TaskResults {
-    override fun get(name: String?): Parcelable? {
+    override fun get(name: String): Parcelable? {
         return bundle.getParcelable(name)
     }
 
