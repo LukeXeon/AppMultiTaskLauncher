@@ -143,6 +143,7 @@ open class RemoteTaskExecutor : ContentProvider() {
 
                     override fun onException(ex: RemoteTaskException) {
                         runCatching { binder.unlinkToDeath(this, 0) }
+                        runCatching { continuation.resumeWithException(ex) }
 
                     }
 
