@@ -152,6 +152,12 @@ fun AnnotationMirror.getAnnotationStringValue(
     return getAnnotationValue(elementName).valueOfType(String::class.java)
 }
 
+fun AnnotationMirror.getAnnotationIntValue(
+    elementName: String
+): Int {
+    return getAnnotationValue(elementName).value as Int
+}
+
 internal inline fun <reified T : Enum<T>> AnnotationMirror.getAnnotationEnumValue(elementName: String): T {
     val annotation = getAnnotationValue(elementName)
     @Suppress("UNCHECKED_CAST")

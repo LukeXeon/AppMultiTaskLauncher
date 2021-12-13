@@ -72,9 +72,10 @@ open class RemoteTaskExecutor : ContentProvider() {
                     var value = holder.value
                     if (value == null) {
                         value = RemoteTaskResult(
-                            taskInfo.directExecute(
+                            taskInfo.execute(
                                 application,
-                                results
+                                results,
+                                direct = true
                             )
                         )
                         holder.value = value
@@ -118,58 +119,53 @@ open class RemoteTaskExecutor : ContentProvider() {
 
     internal class Client(
         private val process: String,
-        private val type: KClass<out TaskExecutor>,
-        private val uncaughtExceptionHandler: RemoteTaskExceptionHandler
+        private val type: KClass<out TaskExecutor>
     ) : TaskExecutor {
 
         override suspend fun execute(
             application: Application,
             results: Map<String, Parcelable>
         ): Parcelable? {
-            try {
-                return suspendCoroutine { continuation ->
-                    var binder by Delegates.notNull<IBinder>()
-                    val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
+            return suspendCoroutine { continuation ->
+                var binder by Delegates.notNull<IBinder>()
+                val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
 
-                        override fun onCompleted(result: RemoteTaskResult) {
-                            try {
-                                binder.unlinkToDeath(this, 0)
-                            } finally {
-                                continuation.resume(result.value)
-                            }
-                        }
-
-                        override fun onException(ex: RemoteTaskException) {
-                            try {
-                                binder.unlinkToDeath(this, 0)
-                            } finally {
-                                continuation.resumeWithException(ex)
-                            }
-                        }
-
-                        override fun binderDied() {
-                            continuation.resumeWithException(DeadObjectException())
+                    override fun onCompleted(result: RemoteTaskResult) {
+                        try {
+                            binder.unlinkToDeath(this, 0)
+                        } finally {
+                            continuation.resume(result.value)
                         }
                     }
-                    val bundle = Bundle()
-                    val args = Bundle()
-                    for ((k, v) in results) {
-                        args.putParcelable(k, v)
+
+                    override fun onException(ex: RemoteTaskException) {
+                        try {
+                            binder.unlinkToDeath(this, 0)
+                        } finally {
+                            continuation.resumeWithException(ex)
+                        }
                     }
-                    BundleCompat.putBinder(bundle, BINDER_KEY, callback)
-                    bundle.putBundle(ARGS_KEY, args)
-                    val result = application.contentResolver.call(
-                        Uri.parse("content://${application.packageName}.remote-task-executor${process}"),
-                        type.qualifiedName ?: throw AssertionError(),
-                        null,
-                        bundle
-                    )!!
-                    binder = BundleCompat.getBinder(result, BINDER_KEY)
-                        ?: throw AssertionError()
-                    binder.linkToDeath(callback, 0)
+
+                    override fun binderDied() {
+                        continuation.resumeWithException(DeadObjectException())
+                    }
                 }
-            } catch (e: Throwable) {
-                return uncaughtExceptionHandler.handleException(e)
+                val bundle = Bundle()
+                val args = Bundle()
+                for ((k, v) in results) {
+                    args.putParcelable(k, v)
+                }
+                BundleCompat.putBinder(bundle, BINDER_KEY, callback)
+                bundle.putBundle(ARGS_KEY, args)
+                val result = application.contentResolver.call(
+                    Uri.parse("content://${application.packageName}.remote-task-executor${process}"),
+                    type.qualifiedName ?: throw AssertionError(),
+                    null,
+                    bundle
+                )!!
+                binder = BundleCompat.getBinder(result, BINDER_KEY)
+                    ?: throw AssertionError()
+                binder.linkToDeath(callback, 0)
             }
         }
     }

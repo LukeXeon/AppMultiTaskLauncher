@@ -4,4 +4,7 @@ import kotlin.reflect.KClass
 
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
-annotation class GeneratedBy(val value: KClass<*>)
+annotation class TaskUncaughtExceptionHandler(
+    val taskType: KClass<*>,
+    val priority: Int = Int.MAX_VALUE
+)

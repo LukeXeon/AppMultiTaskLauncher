@@ -24,7 +24,7 @@ import kotlin.reflect.KClass
 class MultiTask @JvmOverloads @MainThread constructor(
     private val application: Application,
     private val tracker: TaskTracker = TaskTracker.Default,
-    private val uncaughtExceptionHandler: RemoteTaskExceptionHandler = RemoteTaskExceptionHandler.Default,
+    private val defaultUncaughtExceptionHandler: UncaughtExceptionHandler = UncaughtExceptionHandler.Default,
     private val classLoader: ClassLoader? = application.classLoader
 ) {
     companion object {
@@ -86,6 +86,12 @@ class MultiTask @JvmOverloads @MainThread constructor(
     )
     private val mainThread = ExclusiveMainThreadExecutor()
         .asCoroutineDispatcher()
+    private val handlers by lazy {
+        ServiceLoader.load(
+            HandlerInfo::class.java,
+            classLoader
+        )
+    }
 
     private fun startJob(
         task: TaskInfo,
@@ -95,13 +101,22 @@ class MultiTask @JvmOverloads @MainThread constructor(
         return GlobalScope.launch(if (task.executor == TaskExecutorType.Main) mainThread else BACKGROUND_THREAD) {
             dependencies.forEach { it.join() }
             val name = task.name
-            if (!internalTasks.contains(task.type)) {
+            val isInternalTask = internalTasks.contains(task.type)
+            if (!isInternalTask) {
                 tracker.onTaskStarted(name)
             }
             val start = SystemClock.uptimeMillis()
-            val result = task.execute(application, results, uncaughtExceptionHandler)
+            val result = try {
+                task.execute(application, results)
+            } catch (e: Throwable) {
+                val uncaughtExceptionHandler = handlers.asSequence()
+                    .filter { it.taskType == task.type }
+                    .maxByOrNull { it.priority }
+                    ?.newInstance() ?: defaultUncaughtExceptionHandler
+                uncaughtExceptionHandler.handleException(task.type, e)
+            }
             val time = SystemClock.uptimeMillis() - start
-            if (!internalTasks.contains(task.type)) {
+            if (!isInternalTask) {
                 tracker.onTaskFinished(name, time)
             }
             val key = task.type.qualifiedName
@@ -196,8 +211,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
         }
     }
 
-    internal inner class CheckCyclicDependenceTaskInfo : TaskInfo(
-        CheckCyclicDependenceTask::class.qualifiedName!!,
+    internal inner class CheckCyclicDependenceTaskInfo : InternalTaskInfo(
+        CheckCyclicDependenceTask::class,
         executor = TaskExecutorType.Async
     ) {
         lateinit var tasksToBeAnalyzed: Tasks
@@ -205,9 +220,6 @@ class MultiTask @JvmOverloads @MainThread constructor(
         override fun newInstance(): TaskExecutor {
             return CheckCyclicDependenceTask(tasksToBeAnalyzed)
         }
-
-        override val type: KClass<out TaskExecutor>
-            get() = CheckCyclicDependenceTask::class
     }
 
     fun start() {
@@ -256,16 +268,13 @@ class MultiTask @JvmOverloads @MainThread constructor(
             realTasksBuilder.addAll(tasks)
 
             if (!awaitDependencies.isNullOrEmpty()) {
-                val shutdownExclusiveMainThreadTask = object : TaskInfo(
-                    name = ShutdownExclusiveMainThreadTask::class.qualifiedName!!,
+                val shutdownExclusiveMainThreadTask = object : InternalTaskInfo(
+                    ShutdownExclusiveMainThreadTask::class,
                     dependencies = awaitDependencies
                 ) {
                     override fun newInstance(): TaskExecutor {
                         return ShutdownExclusiveMainThreadTask(start)
                     }
-
-                    override val type: KClass<out TaskExecutor>
-                        get() = ShutdownExclusiveMainThreadTask::class
 
                 }
                 realTasksBuilder.add(shutdownExclusiveMainThreadTask)
@@ -273,17 +282,13 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 awaitTasksFinished(SystemClock.uptimeMillis() - start)
             }
 
-            val shutdownBackgroundThreadTask = object : TaskInfo(
-                name = ShutdownBackgroundThreadTask::class.qualifiedName!!,
+            val shutdownBackgroundThreadTask = object : InternalTaskInfo(
+                ShutdownBackgroundThreadTask::class,
                 dependencies = tasks.keys
             ) {
                 override fun newInstance(): TaskExecutor {
                     return ShutdownBackgroundThreadTask(start)
                 }
-
-                override val type: KClass<out TaskExecutor>
-                    get() = ShutdownBackgroundThreadTask::class
-
             }
 
             realTasksBuilder.add(shutdownBackgroundThreadTask)

@@ -6,6 +6,7 @@ import open.source.multitask.annotations.TaskExecutorType
 import kotlin.reflect.KClass
 
 abstract class TaskInfo(
+    val type: KClass<out TaskExecutor>,
     val name: String,
     val executor: TaskExecutorType = TaskExecutorType.Await,
     private val process: String = "",
@@ -15,26 +16,17 @@ abstract class TaskInfo(
     internal suspend inline fun execute(
         application: Application,
         results: Map<String, Parcelable>,
-        uncaughtExceptionHandler: RemoteTaskExceptionHandler
+        direct: Boolean = false
     ): Parcelable? {
-        return if (executor == TaskExecutorType.RemoteAsync) {
-            RemoteTaskExecutor.Client(process, type, uncaughtExceptionHandler)
+        return if (!direct && executor == TaskExecutorType.RemoteAsync) {
+            RemoteTaskExecutor.Client(process, type)
                 .execute(application, results)
         } else {
-            directExecute(application, results)
+            return newInstance().execute(application, results)
         }
     }
 
-    internal suspend inline fun directExecute(
-        application: Application,
-        results: Map<String, Parcelable>
-    ): Parcelable? {
-        return newInstance().execute(application, results)
-    }
-
     protected abstract fun newInstance(): TaskExecutor
-
-    abstract val type: KClass<out TaskExecutor>
 
     override val key: KClass<out TaskExecutor>
         get() = type
