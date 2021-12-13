@@ -20,7 +20,6 @@ import javax.lang.model.element.TypeElement
 import javax.tools.Diagnostic
 import javax.tools.StandardLocation
 import kotlin.collections.ArrayList
-import kotlin.collections.HashMap
 import kotlin.reflect.KClass
 
 @AutoService(value = [Processor::class])
@@ -204,10 +203,6 @@ class TaskInfoProcessor : AbstractProcessor() {
                 log("No new service entries being added.")
                 return
             }
-            if (!checkServices(oldServices, newServices, newServicesDependencies)) {
-                fatalError("Start up dependencies must be cycle.")
-                return
-            }
             log("New service file contents: $allServices")
             val fileObject = filer.createResource(StandardLocation.CLASS_OUTPUT, "", resourceFile)
             fileObject.openOutputStream()
@@ -226,52 +221,6 @@ class TaskInfoProcessor : AbstractProcessor() {
         }
     }
 
-    private fun checkServices(
-        oldServices: Collection<String>,
-        newServices: List<String>,
-        newServicesDependencies: List<List<String>>
-    ): Boolean {
-        val tasks = HashMap<String, List<String>>(oldServices.size + newServices.size)
-        oldServices.asSequence().map {
-            processingEnv.elementUtils.getTypeElement(it)
-                ?: throw ClassNotFoundException("TaskInfo class \"${it}\" not found'")
-        }.map {
-            it.getAnnotationMirror(GeneratedBy::class.java)
-        }.map {
-            it.getAnnotationClassesValue(GeneratedBy::value.name).single()
-        }.forEach {
-            val typeElement = it.toElement().toTypeElement()
-            val taskName = typeElement.qualifiedName.toString()
-            val dependencies = it.toElement().getAnnotationMirror(Task::class.java)
-                .getAnnotationClassesValue(Task::dependencies.name).map { type ->
-                    type.toElement().toTypeElement().qualifiedName.toString()
-                }
-            tasks[taskName] = dependencies
-        }
-        newServices.forEachIndexed { index, s ->
-            tasks[s] = newServicesDependencies[index]
-        }
-        val inDegreeMap = HashMap<String, Int>()
-        val zeroInDegreeQueue = ArrayDeque<String>()
-        val dependencyMap = HashMap<String, ArrayList<String>>()
-
-        for ((key, dependencies) in tasks) {
-            val inDegree = dependencies.size
-            inDegreeMap[key] = inDegree
-            if (inDegree == 0) {
-                zeroInDegreeQueue.offer(key)
-            } else {
-                dependencies.forEach { dependency ->
-                    if (dependencyMap[dependency] == null) {
-                        dependencyMap[dependency] = ArrayList()
-                    }
-                    dependencyMap[dependency]?.add(key)
-                }
-            }
-        }
-
-        return !zeroInDegreeQueue.isEmpty()
-    }
 
     private fun processAnnotations(
         annotations: Set<TypeElement>,
@@ -325,7 +274,7 @@ class TaskInfoProcessor : AbstractProcessor() {
         annotationMirror: AnnotationMirror
     ): Boolean {
         val verify = processingEnv.options["verify"]
-        if (verify == null || !java.lang.Boolean.parseBoolean(verify)) {
+        if (verify == null || !verify.toBoolean()) {
             return true
         }
 
