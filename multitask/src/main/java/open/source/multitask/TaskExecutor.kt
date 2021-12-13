@@ -6,6 +6,6 @@ import android.os.Parcelable
 interface TaskExecutor {
     suspend fun execute(
         application: Application,
-        results: Map<String, Parcelable>
+        results: TaskResults
     ): Parcelable?
 }

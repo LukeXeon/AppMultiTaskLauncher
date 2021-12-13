@@ -7,7 +7,7 @@ abstract class ActionTaskExecutor : TaskExecutor {
 
     final override suspend fun execute(
         application: Application,
-        results: Map<String, Parcelable>
+        results: TaskResults
     ): Parcelable? {
         run(application, results)
         return null
@@ -15,7 +15,7 @@ abstract class ActionTaskExecutor : TaskExecutor {
 
     open fun run(
         application: Application,
-        results: Map<String, Parcelable>
+        results: TaskResults
     ) {
         run(application)
     }

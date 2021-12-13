@@ -61,13 +61,7 @@ open class RemoteTaskExecutor : ContentProvider() {
         val args = extras.getBundle(ARGS_KEY) ?: return null
         val callback = IRemoteTaskCallback.Stub
             .asInterface(BundleCompat.getBinder(extras, BINDER_KEY))
-        val results = ArrayMap<String, Parcelable>(args.size())
-        for (key in args.keySet()) {
-            val p = args.getParcelable<Parcelable>(key)
-            if (p != null) {
-                results[key] = p
-            }
-        }
+        val results = BundleTaskResults(args)
         serviceLoader.find { it.type.qualifiedName == method } ?: return null
         val taskInfo = serviceLoader.find { it.type.qualifiedName == method } ?: return null
         GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {
@@ -131,7 +125,7 @@ open class RemoteTaskExecutor : ContentProvider() {
 
         override suspend fun execute(
             application: Application,
-            results: Map<String, Parcelable>
+            results: TaskResults
         ): Parcelable? {
             return suspendCoroutine { continuation ->
                 var binder by Delegates.notNull<IBinder>()
@@ -159,10 +153,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                     }
                 }
                 val bundle = Bundle()
-                val args = Bundle()
-                for ((k, v) in results) {
-                    args.putParcelable(k, v)
-                }
+                val args = results.toBundle()
                 BundleCompat.putBinder(bundle, BINDER_KEY, callback)
                 bundle.putBundle(ARGS_KEY, args)
                 val result = application.contentResolver.call(

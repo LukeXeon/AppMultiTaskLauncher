@@ -98,7 +98,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     private fun startJob(
         task: TaskInfo,
-        results: MutableMap<String, Parcelable>,
+        resultsMap: MutableMap<String, Parcelable?>,
+        results: TaskResults,
         dependencies: List<Job>
     ): Job {
         return GlobalScope.launch(if (task.isMainThread) mainThread else BACKGROUND_THREAD) {
@@ -123,8 +124,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 tracker.onTaskFinished(name, time)
             }
             val key = task.type.qualifiedName
-            if (result != null && !key.isNullOrEmpty()) {
-                results[key] = result
+            if (!key.isNullOrEmpty()) {
+                resultsMap[key] = result
             }
         }
     }
@@ -142,7 +143,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
         override suspend fun execute(
             application: Application,
-            results: Map<String, Parcelable>
+            results: TaskResults
         ): Parcelable? {
             onUnlockMainThread(SystemClock.uptimeMillis() - start)
             return null
@@ -152,7 +153,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
     internal inner class StartupFinishedTask(private val start: Long) : TaskExecutor {
         override suspend fun execute(
             application: Application,
-            results: Map<String, Parcelable>
+            results: TaskResults
         ): Parcelable? {
             onStartupFinished(SystemClock.uptimeMillis() - start)
             return null
@@ -163,7 +164,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
     private fun startByTopologicalSort(graph: Map<KClass<out TaskExecutor>, TaskInfo>) {
         val unmarked = ArrayList<TaskInfo>(graph.size)
         val temporaryMarked = ArraySet<TaskInfo>(graph.size)
-        val results = ConcurrentHashMap<String, Parcelable>(graph.size)
+        val resultsMap = ConcurrentHashMap<String, Parcelable?>(graph.size)
+        val results = MapTaskResults(resultsMap)
         // sorted list modify to map ↓
         val jobs = ArrayMap<KClass<out TaskExecutor>, Job>(graph.size)
         fun visit(node: TaskInfo) {
@@ -185,12 +187,14 @@ class MultiTask @JvmOverloads @MainThread constructor(
             if (node.dependencies.isEmpty()) {
                 jobs[node.type] = startJob(
                     node,
+                    resultsMap,
                     results,
                     emptyList()
                 )
             } else {
                 jobs[node.type] = startJob(
                     node,
+                    resultsMap,
                     results,
                     node.dependencies.map { jobs.getValue(it) }
                 )

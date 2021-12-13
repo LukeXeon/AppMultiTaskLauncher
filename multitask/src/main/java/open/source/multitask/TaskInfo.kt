@@ -18,7 +18,7 @@ abstract class TaskInfo(
 
     internal suspend inline fun execute(
         application: Application,
-        results: Map<String, Parcelable>,
+        results: TaskResults,
         direct: Boolean = false
     ): Parcelable? {
         return if (!direct && executor == TaskExecutorType.RemoteAsync) {
