@@ -38,9 +38,10 @@ class MultiTask @JvmOverloads @MainThread constructor(
                     parallelism,
                     { pool ->
                         object : ForkJoinWorkerThread(pool) {
-                            override fun run() {
+                            override fun onStart() {
+                                super.onStart()
+                                name = "${BuildConfig.LIBRARY_PACKAGE_NAME}(${name})"
                                 Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
-                                super.run()
                             }
                         }
                     },
@@ -52,9 +53,10 @@ class MultiTask @JvmOverloads @MainThread constructor(
                     parallelism,
                     { pool ->
                         object : jsr166y.ForkJoinWorkerThread(pool) {
-                            override fun run() {
+                            override fun onStart() {
+                                super.onStart()
+                                name = "${BuildConfig.LIBRARY_PACKAGE_NAME}(${name})"
                                 Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
-                                super.run()
                             }
                         }
                     },
