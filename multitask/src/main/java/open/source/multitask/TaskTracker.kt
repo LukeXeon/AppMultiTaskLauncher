@@ -3,37 +3,37 @@ package open.source.multitask
 import android.util.Log
 
 interface TaskTracker {
-    fun onTaskStarted(name: String)
+    suspend fun onTaskStartup(name: String)
 
-    fun onTaskFinished(name: String, time: Long)
+    suspend fun onTaskFinished(name: String, time: Long)
 
-    fun onAwaitTasksFinished(time: Long)
+    suspend fun onUnlockMainThread(time: Long)
 
-    fun onAllTasksFinished(time: Long)
+    suspend fun onStartupFinished(time: Long)
 
     companion object Default : TaskTracker {
         private const val TAG = "TaskTracker"
 
-        override fun onTaskStarted(name: String) {
+        override suspend fun onTaskStartup(name: String) {
             Log.v(
-                TAG, "task started: $name, " +
+                TAG, "task startup: $name, " +
                         "thread: ${Thread.currentThread().name}"
             )
         }
 
-        override fun onTaskFinished(name: String, time: Long) {
+        override suspend fun onTaskFinished(name: String, time: Long) {
             Log.v(
-                TAG, "task finish: $name, " +
+                TAG, "task finished: $name, " +
                         "thread: ${Thread.currentThread().name}, " +
                         "use time: $time"
             )
         }
 
-        override fun onAwaitTasksFinished(time: Long) {
-            Log.d(TAG, "await task finished, use time: $time")
+        override suspend fun onUnlockMainThread(time: Long) {
+            Log.d(TAG, "main thread unlock, use time: $time")
         }
 
-        override fun onAllTasksFinished(time: Long) {
+        override suspend fun onStartupFinished(time: Long) {
             Log.d(TAG, "all task finished, use time: $time")
         }
 

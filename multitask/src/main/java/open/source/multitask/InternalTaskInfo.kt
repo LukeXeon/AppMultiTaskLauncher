@@ -6,7 +6,7 @@ import kotlin.reflect.KClass
 internal abstract class InternalTaskInfo(
     type: KClass<out TaskExecutor>,
     executor: TaskExecutorType = TaskExecutorType.Await,
-    dependencies: List<KClass<out TaskExecutor>> = emptyList()
+    dependencies: Collection<KClass<out TaskExecutor>> = emptyList()
 ) : TaskInfo(
     type,
     type.java.name,

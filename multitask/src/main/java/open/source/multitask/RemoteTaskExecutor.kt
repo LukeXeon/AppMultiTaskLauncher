@@ -60,7 +60,13 @@ open class RemoteTaskExecutor : ContentProvider() {
         val args = extras.getBundle(ARGS_KEY) ?: return null
         val callback = IRemoteTaskCallback.Stub
             .asInterface(BundleCompat.getBinder(extras, BINDER_KEY))
-        val results = FromBundleMap(args)
+        val results = ArrayMap<String, Parcelable>(args.size())
+        for (key in args.keySet()) {
+            val p = args.getParcelable<Parcelable>(key)
+            if (p != null) {
+                results[key] = p
+            }
+        }
         serviceLoader.find { it.type.qualifiedName == method } ?: return null
         val taskInfo = serviceLoader.find { it.type.qualifiedName == method } ?: return null
         GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {

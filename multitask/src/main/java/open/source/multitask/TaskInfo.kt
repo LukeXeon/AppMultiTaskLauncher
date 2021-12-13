@@ -10,8 +10,11 @@ abstract class TaskInfo(
     val name: String,
     val executor: TaskExecutorType = TaskExecutorType.Await,
     private val process: String = "",
-    val dependencies: List<KClass<out TaskExecutor>> = emptyList(),
-) : Map.Entry<KClass<out TaskExecutor>, TaskInfo> {
+    val dependencies: Collection<KClass<out TaskExecutor>> = emptyList(),
+) {
+
+    internal inline val isMainThread: Boolean
+        get() = executor == TaskExecutorType.Main
 
     internal suspend inline fun execute(
         application: Application,
@@ -27,10 +30,5 @@ abstract class TaskInfo(
     }
 
     protected abstract fun newInstance(): TaskExecutor
-
-    override val key: KClass<out TaskExecutor>
-        get() = type
-    override val value: TaskInfo
-        get() = this
 
 }
