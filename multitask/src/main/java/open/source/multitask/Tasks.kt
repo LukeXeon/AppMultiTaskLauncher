@@ -68,8 +68,6 @@ internal class Tasks internal constructor(private val sortedList: List<TaskInfo>
         } != -1
     }
 
-
-
     override fun containsValue(value: TaskInfo): Boolean {
         return sortedList.binarySearch {
             compareValues(

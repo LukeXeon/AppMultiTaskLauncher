@@ -9,11 +9,7 @@ import android.os.*
 import androidx.collection.ArrayMap
 import androidx.core.app.BundleCompat
 import kotlinx.coroutines.*
-import java.lang.Runnable
 import java.util.*
-import java.util.concurrent.ScheduledThreadPoolExecutor
-import java.util.concurrent.ThreadFactory
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -26,22 +22,6 @@ open class RemoteTaskExecutor : ContentProvider() {
     companion object {
         private const val BINDER_KEY = "binder"
         private const val ARGS_KEY = "args"
-        private val DISPATCHER = ScheduledThreadPoolExecutor(
-            0,
-            object : ThreadFactory {
-
-                private val count = AtomicInteger(0)
-
-                override fun newThread(r: Runnable): Thread {
-                    return object : Thread("startup-remote-" + count.getAndIncrement()) {
-                        override fun run() {
-                            Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
-                            r.run()
-                        }
-                    }
-                }
-            }
-        ).asCoroutineDispatcher()
         private val ALIVE_BINDER = Bundle().apply {
             BundleCompat.putBinder(this, BINDER_KEY, Binder())
         }
@@ -76,14 +56,14 @@ open class RemoteTaskExecutor : ContentProvider() {
         val job = synchronized(jobs) {
             var job = jobs[method]
             if (job == null || job.isCancelled) {
-                job = GlobalScope.async(DISPATCHER) {
+                job = GlobalScope.async(MultiTask.BACKGROUND_THREAD) {
                     taskInfo.directExecute(application, results)
                 }
                 jobs[method] = job
             }
             return@synchronized job
         }
-        GlobalScope.launch(DISPATCHER) {
+        GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {
             try {
                 callback.onCompleted(RemoteTaskResult(job.await()))
             } catch (e: Throwable) {
@@ -137,13 +117,19 @@ open class RemoteTaskExecutor : ContentProvider() {
                     val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
 
                         override fun onCompleted(result: RemoteTaskResult) {
-                            binder.unlinkToDeath(this, 0)
-                            continuation.resume(result.value)
+                            try {
+                                binder.unlinkToDeath(this, 0)
+                            } finally {
+                                continuation.resume(result.value)
+                            }
                         }
 
                         override fun onException(ex: RemoteTaskException) {
-                            binder.unlinkToDeath(this, 0)
-                            continuation.resumeWithException(ex)
+                            try {
+                                binder.unlinkToDeath(this, 0)
+                            } finally {
+                                continuation.resumeWithException(ex)
+                            }
                         }
 
                         override fun binderDied() {

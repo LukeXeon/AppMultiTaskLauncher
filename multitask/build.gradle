@@ -37,6 +37,7 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     implementation 'androidx.appcompat:appcompat:1.1.0'
     compileOnly 'androidx.multidex:multidex:2.0.1'
+    implementation 'org.codehaus.jsr166-mirror:jsr166y:1.7.0'
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.4.3"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.4.3"
     api project(":multitask-annotations")

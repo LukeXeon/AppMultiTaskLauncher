@@ -2,6 +2,7 @@ package open.source.multitask
 
 import android.app.Application
 import android.content.pm.ApplicationInfo
+import android.os.Build
 import android.os.Parcelable
 import android.os.Process
 import android.os.SystemClock
@@ -12,14 +13,11 @@ import androidx.core.os.TraceCompat
 import kotlinx.coroutines.*
 import open.source.multitask.annotations.TaskExecutorType
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.ScheduledThreadPoolExecutor
-import java.util.concurrent.ThreadFactory
+import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.ArrayList
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.reflect.KClass
 
 
@@ -32,6 +30,39 @@ class MultiTask @JvmOverloads @MainThread constructor(
     companion object {
         private const val TAG = "MultiTask"
         private val REENTRY_CHECK = AtomicBoolean()
+        private const val MAX_CAP = 0x7fff // max #workers - 1
+        internal val BACKGROUND_THREAD = run {
+            val parallelism = min(MAX_CAP, max(4, Runtime.getRuntime().availableProcessors()))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                ForkJoinPool(
+                    parallelism,
+                    { pool ->
+                        object : ForkJoinWorkerThread(pool) {
+                            override fun run() {
+                                Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
+                                super.run()
+                            }
+                        }
+                    },
+                    null,
+                    true
+                )
+            } else {
+                jsr166y.ForkJoinPool(
+                    parallelism,
+                    { pool ->
+                        object : jsr166y.ForkJoinWorkerThread(pool) {
+                            override fun run() {
+                                Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
+                                super.run()
+                            }
+                        }
+                    },
+                    null,
+                    true
+                )
+            }.asCoroutineDispatcher()
+        }
 
         @JvmStatic
         @MainThread
@@ -53,29 +84,13 @@ class MultiTask @JvmOverloads @MainThread constructor(
     )
     private val mainThread = ExclusiveMainThreadExecutor()
         .asCoroutineDispatcher()
-    private val backgroundThread = ScheduledThreadPoolExecutor(
-        max(4, Runtime.getRuntime().availableProcessors()),
-        object : ThreadFactory {
-
-            private val count = AtomicInteger(0)
-
-            override fun newThread(r: Runnable): Thread {
-                return object : Thread("startup-background-" + count.getAndIncrement()) {
-                    override fun run() {
-                        Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
-                        r.run()
-                    }
-                }
-            }
-        }
-    ).asCoroutineDispatcher()
 
     private fun startJob(
         task: TaskInfo,
         results: MutableMap<String, Parcelable>,
         dependencies: List<Job>
     ): Job {
-        return GlobalScope.launch(if (task.executor == TaskExecutorType.Main) mainThread else backgroundThread) {
+        return GlobalScope.launch(if (task.executor == TaskExecutorType.Main) mainThread else BACKGROUND_THREAD) {
             dependencies.forEach { it.join() }
             val name = task.name
             if (!internalTasks.contains(task.type)) {
@@ -120,7 +135,6 @@ class MultiTask @JvmOverloads @MainThread constructor(
     }
 
     private fun allTasksFinished(time: Long) {
-        (backgroundThread.executor as ExecutorService).shutdown()
         tracker.onAllTasksFinished(time)
     }
 
@@ -171,7 +185,12 @@ class MultiTask @JvmOverloads @MainThread constructor(
         }
 
         override fun run(application: Application) {
-            Log.d(TAG, "Check cyclic dependence: " + topologicalSort().joinToString())
+            Log.d(
+                TAG, "Check cyclic dependence: " + topologicalSort()
+                    .joinToString {
+                        it.qualifiedName ?: ""
+                    }
+            )
         }
     }
 
@@ -191,7 +210,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     fun start() {
         val start = SystemClock.uptimeMillis()
-        backgroundThread.executor.execute {
+        BACKGROUND_THREAD.executor.execute {
             TraceCompat.beginSection(TAG)
             val it = ServiceLoader.load(TaskInfo::class.java, classLoader)
                 .iterator()
