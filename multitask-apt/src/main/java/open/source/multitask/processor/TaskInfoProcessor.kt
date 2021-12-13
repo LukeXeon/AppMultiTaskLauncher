@@ -5,6 +5,7 @@ import androidx.annotation.RestrictTo
 import com.google.auto.service.AutoService
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.MemberName.Companion.member
+import open.source.multitask.annotations.GeneratedBy
 import open.source.multitask.annotations.Task
 import open.source.multitask.annotations.TaskExecutorType
 import java.io.IOException
@@ -19,6 +20,7 @@ import javax.lang.model.element.TypeElement
 import javax.tools.Diagnostic
 import javax.tools.StandardLocation
 import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
 import kotlin.reflect.KClass
 
 @AutoService(value = [Processor::class])
@@ -29,7 +31,7 @@ class TaskInfoProcessor : AbstractProcessor() {
         private const val ANDROID_TASK_EXECUTOR_CLASS_NAME = "open.source.multitask.TaskExecutor"
     }
 
-    private val tasks = ArrayList<TaskInfo>()
+    private val tasks = ArrayList<TaskInfoElement>()
     private val exceptionStacks = ArrayList<String>()
     private lateinit var taskInfoType: TypeElement
 
@@ -80,7 +82,8 @@ class TaskInfoProcessor : AbstractProcessor() {
                     )
                 )
         }
-        val newServices = ArrayList<String>()
+        val newServices = ArrayList<String>(tasks.size)
+        val newServicesDependencies = ArrayList<List<String>>(tasks.size)
         for (task in tasks) {
             val packageName = elementUtils.getPackageOf(task.type).qualifiedName
             val name = "${task.type.simpleName}_TaskInfo_Hash${task.name.hashCode()}"
@@ -89,6 +92,7 @@ class TaskInfoProcessor : AbstractProcessor() {
             } else {
                 newServices.add("${packageName}.${name}")
             }
+            newServicesDependencies.add(task.dependencies.map { it.qualifiedName.toString() })
             FileSpec.get(
                 packageName.toString(),
                 TypeSpec.classBuilder(
@@ -104,6 +108,11 @@ class TaskInfoProcessor : AbstractProcessor() {
                                 RestrictTo.Scope::class.asTypeName()
                                     .member(RestrictTo.Scope.LIBRARY.name)
                             )
+                            .build()
+                    )
+                    .addAnnotation(
+                        AnnotationSpec.builder(GeneratedBy::class.java)
+                            .addMember("%N = %T::class", "value", task.type)
                             .build()
                     )
                     .addAnnotation(
@@ -165,6 +174,7 @@ class TaskInfoProcessor : AbstractProcessor() {
         val resourceFile = "META-INF/services/$ANDROID_TASK_INFO_CLASS_NAME"
         try {
             val allServices = TreeSet<String>()
+            val oldServices = ArrayList<String>()
             try {
                 // would like to be able to print the full path
                 // before we attempt to get the resource in case the behavior
@@ -176,8 +186,10 @@ class TaskInfoProcessor : AbstractProcessor() {
                     resourceFile
                 )
                 log("Looking for existing resource file at " + existingFile.toUri())
-                val oldServices = existingFile.openInputStream()
-                    .use { it.reader().use { it.readLines() } }
+                oldServices.addAll(
+                    existingFile.openInputStream()
+                        .use { it.reader().use { reader -> reader.readLines() } }
+                )
                 log("Existing service entries: $oldServices")
                 allServices.addAll(oldServices)
             } catch (e: IOException) {
@@ -192,6 +204,10 @@ class TaskInfoProcessor : AbstractProcessor() {
                 log("No new service entries being added.")
                 return
             }
+            if (!checkServices(oldServices, newServices, newServicesDependencies)) {
+                fatalError("Start up dependencies must be cycle.")
+                return
+            }
             log("New service file contents: $allServices")
             val fileObject = filer.createResource(StandardLocation.CLASS_OUTPUT, "", resourceFile)
             fileObject.openOutputStream()
@@ -202,11 +218,59 @@ class TaskInfoProcessor : AbstractProcessor() {
                         }
                     }
                 }
+
             log("Wrote to: " + fileObject.toUri())
         } catch (e: IOException) {
             fatalError("Unable to create $resourceFile, $e")
             return
         }
+    }
+
+    private fun checkServices(
+        oldServices: Collection<String>,
+        newServices: List<String>,
+        newServicesDependencies: List<List<String>>
+    ): Boolean {
+        val tasks = HashMap<String, List<String>>(oldServices.size + newServices.size)
+        oldServices.asSequence().map {
+            processingEnv.elementUtils.getTypeElement(it)
+                ?: throw ClassNotFoundException("TaskInfo class \"${it}\" not found'")
+        }.map {
+            it.getAnnotationMirror(GeneratedBy::class.java)
+        }.map {
+            it.getAnnotationClassesValue(GeneratedBy::value.name).single()
+        }.forEach {
+            val typeElement = it.toElement().toTypeElement()
+            val taskName = typeElement.qualifiedName.toString()
+            val dependencies = it.toElement().getAnnotationMirror(Task::class.java)
+                .getAnnotationClassesValue(Task::dependencies.name).map { type ->
+                    type.toElement().toTypeElement().qualifiedName.toString()
+                }
+            tasks[taskName] = dependencies
+        }
+        newServices.forEachIndexed { index, s ->
+            tasks[s] = newServicesDependencies[index]
+        }
+        val inDegreeMap = HashMap<String, Int>()
+        val zeroInDegreeQueue = ArrayDeque<String>()
+        val dependencyMap = HashMap<String, ArrayList<String>>()
+
+        for ((key, dependencies) in tasks) {
+            val inDegree = dependencies.size
+            inDegreeMap[key] = inDegree
+            if (inDegree == 0) {
+                zeroInDegreeQueue.offer(key)
+            } else {
+                dependencies.forEach { dependency ->
+                    if (dependencyMap[dependency] == null) {
+                        dependencyMap[dependency] = ArrayList()
+                    }
+                    dependencyMap[dependency]?.add(key)
+                }
+            }
+        }
+
+        return !zeroInDegreeQueue.isEmpty()
     }
 
     private fun processAnnotations(
@@ -236,7 +300,7 @@ class TaskInfoProcessor : AbstractProcessor() {
                     it.toElement().toTypeElement()
                 }
 
-            val task = TaskInfo(
+            val task = TaskInfoElement(
                 type = typeElement,
                 name = name,
                 executor = executorType,

@@ -7,7 +7,7 @@ import kotlin.reflect.KClass
 
 abstract class TaskInfo(
     val name: String,
-    val executor: TaskExecutorType = TaskExecutorType.Async,
+    val executor: TaskExecutorType = TaskExecutorType.Await,
     private val process: String = "",
     val dependencies: Collection<KClass<out TaskExecutor>>,
 ) {

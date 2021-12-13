@@ -6,7 +6,7 @@ import kotlin.reflect.KClass
 @Retention(AnnotationRetention.BINARY)
 annotation class Task(
     val name: String,
-    val executor: TaskExecutorType = TaskExecutorType.Async,
+    val executor: TaskExecutorType = TaskExecutorType.Await,
     val process: String = "",
     val dependencies: Array<KClass<*>> = []
 )

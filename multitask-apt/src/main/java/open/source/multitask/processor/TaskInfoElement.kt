@@ -3,7 +3,7 @@ package open.source.multitask.processor
 import open.source.multitask.annotations.TaskExecutorType
 import javax.lang.model.element.TypeElement
 
-data class TaskInfo(
+data class TaskInfoElement(
     val type: TypeElement,
     val name: String,
     val executor: TaskExecutorType,
