@@ -130,7 +130,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
     }
 
     private suspend fun onUnlockMainThread(time: Long) {
-        (mainThread.executor as ExecutorService).shutdown()
+        mainThread.close()
         tracker.onUnlockMainThread(time)
     }
 
