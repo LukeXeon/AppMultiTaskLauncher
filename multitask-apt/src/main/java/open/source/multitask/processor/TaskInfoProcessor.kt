@@ -85,7 +85,7 @@ class TaskInfoProcessor : AbstractProcessor() {
         val newServicesDependencies = ArrayList<List<String>>(tasks.size)
         for (task in tasks) {
             val packageName = elementUtils.getPackageOf(task.type).qualifiedName
-            val name = "${task.type.simpleName}_TaskInfo_Hash${task.name.hashCode()}"
+            val name = "${task.type.simpleName}_Runtime_TaskInfo"
             if (packageName.isNullOrEmpty()) {
                 newServices.add(name)
             } else {
@@ -148,7 +148,7 @@ class TaskInfoProcessor : AbstractProcessor() {
                         }
                     )
                     .addSuperclassConstructorParameter(
-                        "%N = setOf(${task.dependencies.joinToString { "%T::class" }})",
+                        "%N = listOf(${task.dependencies.joinToString { "%T::class" }})",
                         "dependencies",
                         *task.dependencies.toTypedArray()
                     )
@@ -245,9 +245,10 @@ class TaskInfoProcessor : AbstractProcessor() {
             val executorType = annotationMirror
                 .getAnnotationEnumValue<TaskExecutorType>(Task::executor.name)
             val dependencies = annotationMirror
-                .getAnnotationClassesValue(Task::dependencies.name).map {
+                .getAnnotationClassesValue(Task::dependencies.name).asSequence().map {
                     it.toElement().toTypeElement()
-                }
+                }.sortedBy { it.qualifiedName.toString() }
+                .toList()
 
             val task = TaskInfoElement(
                 type = typeElement,

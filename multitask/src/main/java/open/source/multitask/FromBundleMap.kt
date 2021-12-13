@@ -2,16 +2,38 @@ package open.source.multitask
 
 import android.os.Bundle
 import android.os.Parcelable
-import androidx.collection.ArraySet
 
 internal class FromBundleMap(private val bundle: Bundle) : Map<String, Parcelable> {
     override val entries: Set<Map.Entry<String, Parcelable>> by lazy {
-        bundle.keySet().mapTo(ArraySet(bundle.size())) {
-            object : Map.Entry<String, Parcelable> {
-                override val key: String
-                    get() = it
-                override val value: Parcelable
-                    get() = bundle.getParcelable(it)!!
+        object : Set<Map.Entry<String, Parcelable>> {
+            override val size: Int
+                get() = bundle.size()
+
+            override fun contains(element: Map.Entry<String, Parcelable>): Boolean {
+                if (bundle.containsKey(element.key)) {
+                    return bundle.getParcelable<Parcelable>(element.key) == element.value
+                }
+                return false
+            }
+
+            override fun containsAll(elements: Collection<Map.Entry<String, Parcelable>>): Boolean {
+                return elements.all { contains(it) }
+            }
+
+            override fun isEmpty(): Boolean {
+                return bundle.isEmpty
+            }
+
+            override fun iterator(): Iterator<Map.Entry<String, Parcelable>> {
+                return bundle.keySet().asSequence()
+                    .map {
+                        object : Map.Entry<String, Parcelable> {
+                            override val key: String
+                                get() = it
+                            override val value: Parcelable
+                                get() = bundle.getParcelable(it)!!
+                        }
+                    }.iterator()
             }
         }
     }

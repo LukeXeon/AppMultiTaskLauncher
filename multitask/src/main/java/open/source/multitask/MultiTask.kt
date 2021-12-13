@@ -1,9 +1,11 @@
 package open.source.multitask
 
 import android.app.Application
+import android.content.pm.ApplicationInfo
 import android.os.Parcelable
 import android.os.Process
 import android.os.SystemClock
+import android.util.Log
 import androidx.annotation.MainThread
 import androidx.collection.ArrayMap
 import androidx.core.os.TraceCompat
@@ -20,6 +22,7 @@ import kotlin.collections.ArrayList
 import kotlin.math.max
 import kotlin.reflect.KClass
 
+
 class MultiTask @JvmOverloads @MainThread constructor(
     private val application: Application,
     private val tracker: TaskTracker = TaskTracker.Default,
@@ -27,11 +30,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
     private val classLoader: ClassLoader? = application.classLoader
 ) {
     companion object {
-        private const val TAG = "AppMultiTaskLauncher"
+        private const val TAG = "MultiTask"
         private val REENTRY_CHECK = AtomicBoolean()
-        private fun <K, V> createMap(capacity: Int): MutableMap<K, V> {
-            return ArrayMap(capacity)
-        }
 
         @JvmStatic
         @MainThread
@@ -46,7 +46,11 @@ class MultiTask @JvmOverloads @MainThread constructor(
         }
     }
 
-    private val internalTasks = arrayOf(AwaitTaskFinished::class, AllTaskFinished::class)
+    private val internalTasks = arrayOf(
+        ShutdownExclusiveMainThreadTask::class,
+        ShutdownBackgroundThreadTask::class,
+        CheckCyclicDependenceTask::class
+    )
     private val mainThread = ExclusiveMainThreadExecutor()
         .asCoroutineDispatcher()
     private val backgroundThread = ScheduledThreadPoolExecutor(
@@ -120,16 +124,69 @@ class MultiTask @JvmOverloads @MainThread constructor(
         tracker.onAllTasksFinished(time)
     }
 
-    internal inner class AwaitTaskFinished(private val start: Long) : ActionTaskExecutor() {
+    internal inner class ShutdownExclusiveMainThreadTask(private val start: Long) :
+        ActionTaskExecutor() {
         override fun run(application: Application) {
             awaitTasksFinished(SystemClock.uptimeMillis() - start)
         }
     }
 
-    internal inner class AllTaskFinished(private val start: Long) : ActionTaskExecutor() {
+    internal inner class ShutdownBackgroundThreadTask(private val start: Long) :
+        ActionTaskExecutor() {
         override fun run(application: Application) {
             allTasksFinished(SystemClock.uptimeMillis() - start)
         }
+    }
+
+    internal inner class CheckCyclicDependenceTask(
+        private val graph: Tasks
+    ) : ActionTaskExecutor() {
+
+        private fun topologicalSort(): List<KClass<out TaskExecutor>> {
+            val unmarked = ArrayList<KClass<out TaskExecutor>>(graph.size)
+            val sorted = ArrayList<KClass<out TaskExecutor>>(graph.size)
+            val temporaryMarked = ArrayList<KClass<out TaskExecutor>>(graph.size)
+            fun visit(node: KClass<out TaskExecutor>) {
+                if (node in sorted) {
+                    return
+                }
+                check(node !in temporaryMarked) {
+                    "cyclic dependency detected, $node already visited"
+                }
+
+                temporaryMarked.add(node)
+                graph[node]?.dependencies?.forEach { visit(it) }
+
+                unmarked.remove(node)
+                temporaryMarked.remove(node)
+                sorted.add(node)
+            }
+
+            unmarked.addAll(graph.keys)
+            while (unmarked.isNotEmpty()) {
+                visit(unmarked.first())
+            }
+
+            return sorted
+        }
+
+        override fun run(application: Application) {
+            Log.d(TAG, "Check cyclic dependence: " + topologicalSort().joinToString())
+        }
+    }
+
+    internal inner class CheckCyclicDependenceTaskInfo : TaskInfo(
+        CheckCyclicDependenceTask::class.qualifiedName!!,
+        executor = TaskExecutorType.Async
+    ) {
+        lateinit var tasksToBeAnalyzed: Tasks
+
+        override fun newInstance(): TaskExecutor {
+            return CheckCyclicDependenceTask(tasksToBeAnalyzed)
+        }
+
+        override val type: KClass<out TaskExecutor>
+            get() = CheckCyclicDependenceTask::class
     }
 
     fun start() {
@@ -138,14 +195,19 @@ class MultiTask @JvmOverloads @MainThread constructor(
             TraceCompat.beginSection(TAG)
             val it = ServiceLoader.load(TaskInfo::class.java, classLoader)
                 .iterator()
-            var tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo>? = null
+            var tasksBuilder: Tasks.Builder? = null
             var awaitDependencies: ArrayList<KClass<out TaskExecutor>>? = null
+            var checkCyclicDependenceTask: CheckCyclicDependenceTaskInfo? = null
             while (it.hasNext()) {
-                if (tasks == null) {
-                    tasks = createMap(128)
+                if (tasksBuilder == null) {
+                    tasksBuilder = Tasks.Builder(128)
+                    if (application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                        checkCyclicDependenceTask = CheckCyclicDependenceTaskInfo()
+                        tasksBuilder.add(checkCyclicDependenceTask)
+                    }
                 }
                 val task = it.next()
-                tasks[task.type] = task
+                tasksBuilder.add(task)
                 if (task.executor == TaskExecutorType.Main
                     || task.executor == TaskExecutorType.Await
                     || task.executor == TaskExecutorType.RemoteAwait
@@ -157,48 +219,54 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 }
             }
 
-            if (tasks == null || tasks.isEmpty()) {
+            if (tasksBuilder == null) {
                 val time = SystemClock.uptimeMillis() - start
                 awaitTasksFinished(time)
                 allTasksFinished(time)
                 return@execute
             }
-            val realTasks = createMap<KClass<out TaskExecutor>, TaskInfo>(
+
+            val tasks = tasksBuilder.build()
+            checkCyclicDependenceTask?.tasksToBeAnalyzed = tasks
+            val realTasksBuilder = Tasks.Builder(
                 tasks.size + internalTasks.size
             )
-            realTasks.putAll(tasks)
+
+            realTasksBuilder.addAll(tasks)
 
             if (!awaitDependencies.isNullOrEmpty()) {
-                val awaitFinishedTask = object : TaskInfo(
-                    name = AwaitTaskFinished::class.qualifiedName!!,
+                val shutdownExclusiveMainThreadTask = object : TaskInfo(
+                    name = ShutdownExclusiveMainThreadTask::class.qualifiedName!!,
                     dependencies = awaitDependencies
                 ) {
                     override fun newInstance(): TaskExecutor {
-                        return AwaitTaskFinished(start)
+                        return ShutdownExclusiveMainThreadTask(start)
                     }
 
                     override val type: KClass<out TaskExecutor>
-                        get() = AwaitTaskFinished::class
+                        get() = ShutdownExclusiveMainThreadTask::class
 
                 }
-                realTasks[awaitFinishedTask.type] = awaitFinishedTask
+                realTasksBuilder.add(shutdownExclusiveMainThreadTask)
             } else {
                 awaitTasksFinished(SystemClock.uptimeMillis() - start)
             }
 
-            val allFinishedTask = object : TaskInfo(
-                name = AllTaskFinished::class.qualifiedName!!,
+            val shutdownBackgroundThreadTask = object : TaskInfo(
+                name = ShutdownBackgroundThreadTask::class.qualifiedName!!,
                 dependencies = tasks.keys
             ) {
                 override fun newInstance(): TaskExecutor {
-                    return AllTaskFinished(start)
+                    return ShutdownBackgroundThreadTask(start)
                 }
 
                 override val type: KClass<out TaskExecutor>
-                    get() = AllTaskFinished::class
+                    get() = ShutdownBackgroundThreadTask::class
 
             }
-            realTasks[allFinishedTask.type] = allFinishedTask
+
+            realTasksBuilder.add(shutdownBackgroundThreadTask)
+            val realTasks = realTasksBuilder.build()
             val results = ConcurrentHashMap<String, Parcelable>(realTasks.size)
             val jobs = ArrayMap<TaskInfo, Job>(realTasks.size)
             for (task in realTasks.values) {
