@@ -66,6 +66,10 @@ class MultiTask @JvmOverloads @MainThread constructor(
             }.asCoroutineDispatcher()
         }
 
+        private fun MutableMap<KClass<out TaskExecutor>, TaskInfo>.add(task: TaskInfo) {
+            put(task.type, task)
+        }
+
         @JvmStatic
         @MainThread
         fun start(application: Application) {
@@ -198,10 +202,6 @@ class MultiTask @JvmOverloads @MainThread constructor(
             visit(unmarked.first())
         }
 
-    }
-
-    private fun MutableMap<KClass<out TaskExecutor>, TaskInfo>.add(task: TaskInfo) {
-        put(task.type, task)
     }
 
     fun start() {
