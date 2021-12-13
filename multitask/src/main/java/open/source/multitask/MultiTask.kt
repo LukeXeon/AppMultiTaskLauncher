@@ -246,7 +246,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             if (!mainThreadAwaitDependencies.isNullOrEmpty()) {
                 val unlockMainThreadTask = object : InternalTaskInfo(
                     UnlockMainThreadTask::class,
-                    dependencies = mainThreadAwaitDependencies
+                    mainThreadAwaitDependencies
                 ) {
                     override fun newInstance(): TaskExecutor {
                         return UnlockMainThreadTask(start)
@@ -260,7 +260,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
             val startupFinishedTask = object : InternalTaskInfo(
                 StartupFinishedTask::class,
-                dependencies = userTasks.keys
+                userTasks.keys
             ) {
                 override fun newInstance(): TaskExecutor {
                     return StartupFinishedTask(start)

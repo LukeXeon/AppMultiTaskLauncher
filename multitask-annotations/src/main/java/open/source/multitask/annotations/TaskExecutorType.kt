@@ -5,5 +5,5 @@ enum class TaskExecutorType {
     Async,
     Await,
     RemoteAsync,
-    RemoteAwait
+    RemoteAwait,
 }

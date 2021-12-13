@@ -5,12 +5,11 @@ import kotlin.reflect.KClass
 
 internal abstract class InternalTaskInfo(
     type: KClass<out TaskExecutor>,
-    executor: TaskExecutorType = TaskExecutorType.Await,
-    dependencies: Collection<KClass<out TaskExecutor>> = emptyList()
+    dependencies: Collection<KClass<out TaskExecutor>>
 ) : TaskInfo(
     type,
     type.java.name,
-    executor,
+    TaskExecutorType.Async,
     "",
     dependencies
 )
