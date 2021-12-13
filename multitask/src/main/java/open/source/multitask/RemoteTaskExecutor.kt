@@ -9,6 +9,8 @@ import android.os.*
 import androidx.collection.ArrayMap
 import androidx.core.app.BundleCompat
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.*
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -27,7 +29,15 @@ open class RemoteTaskExecutor : ContentProvider() {
         }
     }
 
-    private val jobs = ArrayMap<String, Deferred<Parcelable?>>()
+    internal class MutexResultHolder {
+        val mutex = Mutex()
+
+        @Volatile
+        var value: RemoteTaskResult? = null
+    }
+
+    private val holdersMutex = Mutex()
+    private val holders = ArrayMap<String, MutexResultHolder>()
     private val serviceLoader by lazy {
         ServiceLoader.load(TaskInfo::class.java, classLoader)
     }
@@ -53,19 +63,24 @@ open class RemoteTaskExecutor : ContentProvider() {
         val results = FromBundleMap(args)
         serviceLoader.find { it.type.qualifiedName == method } ?: return null
         val taskInfo = serviceLoader.find { it.type.qualifiedName == method } ?: return null
-        val job = synchronized(jobs) {
-            var job = jobs[method]
-            if (job == null || job.isCancelled) {
-                job = GlobalScope.async(MultiTask.BACKGROUND_THREAD) {
-                    taskInfo.directExecute(application, results)
-                }
-                jobs[method] = job
-            }
-            return@synchronized job
-        }
         GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {
+            val holder = holdersMutex.withLock {
+                holders.getOrPut(method) { MutexResultHolder() }
+            }
             try {
-                callback.onCompleted(RemoteTaskResult(job.await()))
+                holder.mutex.withLock {
+                    var value = holder.value
+                    if (value == null) {
+                        value = RemoteTaskResult(
+                            taskInfo.directExecute(
+                                application,
+                                results
+                            )
+                        )
+                        holder.value = value
+                    }
+                    callback.onCompleted(value)
+                }
             } catch (e: Throwable) {
                 callback.onException(RemoteTaskException(e))
             }
