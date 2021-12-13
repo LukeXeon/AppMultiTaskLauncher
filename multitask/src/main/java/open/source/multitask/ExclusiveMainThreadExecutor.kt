@@ -1,9 +1,12 @@
 package open.source.multitask
 
 import android.os.Looper
+import android.os.Process
 import androidx.core.os.HandlerCompat
 import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.concurrent.thread
 
 internal class ExclusiveMainThreadExecutor : AbstractExecutorService(),
     ScheduledExecutorService {
@@ -41,9 +44,11 @@ internal class ExclusiveMainThreadExecutor : AbstractExecutorService(),
 
     private val mainThread = HandlerCompat.createAsync(Looper.getMainLooper())
     private val queue = DelayQueue<ScheduledFutureTask<*>>()
+    private val isRunning: Boolean
+        get() = !queue.isEmpty() || !isShutdown.get()
     private val runner = object : Runnable {
         override fun run() {
-            if (countDownLatch.count > 0) {
+            if (isRunning) {
                 mainThread.postAtFrontOfQueue(this)
                 var action = queue.poll()
                 if (action != null) {
@@ -59,7 +64,7 @@ internal class ExclusiveMainThreadExecutor : AbstractExecutorService(),
             }
         }
     }
-    private val countDownLatch = CountDownLatch(1)
+    private val isShutdown = AtomicBoolean()
 
     init {
         mainThread.postAtFrontOfQueue(runner)
@@ -142,41 +147,50 @@ internal class ExclusiveMainThreadExecutor : AbstractExecutorService(),
     }
 
     override fun execute(command: Runnable) {
-        if (!isShutdown) {
+        if (!isShutdown.get()) {
             queue.add(ScheduledFutureTask(command, Unit, triggerTime(queue, 0)))
         } else {
             throw RejectedExecutionException("Already shutdown")
         }
     }
 
+
     override fun shutdown() {
-        countDownLatch.countDown()
-        mainThread.removeCallbacks(runner)
-        queue.clear()
+        isShutdown.compareAndSet(false, true)
     }
 
     override fun shutdownNow(): List<Runnable> {
-        countDownLatch.countDown()
-        mainThread.removeCallbacks(runner)
-        val list = queue.toList()
-        queue.clear()
-        return list
+        return if (isShutdown.compareAndSet(false, true)) {
+            val list = queue.toList()
+            queue.clear()
+            list
+        } else {
+            emptyList()
+        }
     }
 
     override fun isShutdown(): Boolean {
-        return countDownLatch.count <= 0
+        return isShutdown.get()
     }
 
     override fun isTerminated(): Boolean {
-        return isShutdown
+        return isShutdown.get()
     }
 
-    override fun awaitTermination(timeout: Long, unit: TimeUnit?): Boolean {
-        return countDownLatch.await(timeout, unit)
+    override fun awaitTermination(timeout: Long, unit: TimeUnit): Boolean {
+        val start = now()
+        while (isRunning) {
+            if (now() - start > unit.convert(timeout, TimeUnit.NANOSECONDS)) {
+                return false
+            } else {
+                Thread.yield()
+            }
+        }
+        return true
     }
 
     private fun <T> delayedExecute(task: ScheduledFutureTask<T>): ScheduledFutureTask<T> {
-        if (isShutdown) {
+        if (isShutdown.get()) {
             throw RejectedExecutionException("Already shutdown")
         }
         queue.add(task)
