@@ -5,7 +5,11 @@ import android.os.Parcelable
 
 internal class MapTaskResults(private val map: Map<String, Parcelable>) : TaskResults {
     override fun get(name: String): Parcelable? {
-        return map[name]
+        val p = map[name]
+        if (p is NullMarker) {
+            return null
+        }
+        return p
     }
 
     override fun containsKey(name: String?): Boolean {
