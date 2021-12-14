@@ -206,7 +206,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     fun start() {
         val start = SystemClock.uptimeMillis()
-        Log.d(TAG, "start")
+        Log.d(TAG, "begin invoke startup")
         GlobalScope.launch(BACKGROUND_THREAD) {
             TraceCompat.beginSection(TAG)
             val it = ServiceLoader.load(TaskInfo::class.java, classLoader)
@@ -269,6 +269,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             graph.add(startupFinishedTask)
             startByTopologicalSort(graph)
             TraceCompat.endSection()
+            Log.d(TAG, "end invoke startup, use time: ${SystemClock.uptimeMillis() - start}")
         }
     }
 
