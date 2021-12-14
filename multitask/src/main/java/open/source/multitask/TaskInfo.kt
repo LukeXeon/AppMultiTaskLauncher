@@ -9,7 +9,7 @@ abstract class TaskInfo(
     val type: KClass<out TaskExecutor>,
     val name: String,
     val executor: TaskExecutorType = TaskExecutorType.Await,
-    private val process: String = "",
+    val process: String = "",
     val dependencies: Collection<KClass<out TaskExecutor>> = emptyList(),
 ) {
 
@@ -35,7 +35,7 @@ abstract class TaskInfo(
         direct: Boolean = false
     ): Parcelable? {
         return if (!direct && isRemote) {
-            RemoteTaskExecutor.Client(process, type)
+            RemoteTaskExecutor.Client(this)
                 .execute(application, results)
         } else {
             return newInstance().execute(application, results)

@@ -17,13 +17,16 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 import kotlin.properties.Delegates
-import kotlin.reflect.KClass
 
 
 open class RemoteTaskExecutor : ContentProvider() {
 
     companion object {
         private const val BINDER_KEY = "binder"
+        private const val NAME_KEY = "name"
+        private const val TYPE_KEY = "type"
+        private const val PROCESS_KEY = "process"
+        private const val DEPENDENCIES_KEY = "dependencies"
         private const val ARGS_KEY = "args"
         private val ALIVE_BINDER = Bundle().apply {
             BundleCompat.putBinder(this, BINDER_KEY, Binder())
@@ -50,20 +53,30 @@ open class RemoteTaskExecutor : ContentProvider() {
         extras: Bundle?
     ): Bundle? {
         extras ?: return null
-        val args = extras.getBundle(ARGS_KEY) ?: return null
         val application = context?.applicationContext as? Application ?: return null
-        val callback = IRemoteTaskCallback.Stub
-            .asInterface(BundleCompat.getBinder(extras, BINDER_KEY))
+        val name = extras.getString(NAME_KEY)
+        val process = extras.getString(PROCESS_KEY)
+        val type = extras.getString(TYPE_KEY)
+        val dependencies = extras.getStringArrayList(DEPENDENCIES_KEY) ?: emptyList<String>()
+        val args = extras.getBundle(ARGS_KEY) ?: Bundle.EMPTY
+        val results = BundleTaskResults(args)
+        val callback = IRemoteTaskCallback.Stub.asInterface(
+            BundleCompat.getBinder(extras, BINDER_KEY)
+        )
         GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {
             try {
                 MultiTask.loadModules(application)
-                val results = BundleTaskResults(args)
-                val taskInfo = MultiTask.TASKS.find { it.type.qualifiedName == method }
-                    ?: throw ClassNotFoundException("task class $method not found " + MultiTask.TASKS.joinToString {
-                        it.type.qualifiedName ?: ""
-                    })
+                val taskInfo = MultiTask.TASKS.find {
+                    it.name == name && it.process == process
+                            && it.type.qualifiedName == type
+                            && it.dependencies.all { c ->
+                        dependencies.contains(
+                            c.qualifiedName
+                        )
+                    }
+                } ?: throw ClassNotFoundException("task class $type not found ")
                 val holder = holdersMutex.withLock {
-                    holders.getOrPut(method) { MutexResultHolder() }
+                    holders.getOrPut(type) { MutexResultHolder() }
                 }
                 holder.mutex.withLock {
                     var value = holder.value
@@ -115,8 +128,7 @@ open class RemoteTaskExecutor : ContentProvider() {
     ): Int = 0
 
     internal class Client(
-        private val process: String,
-        private val type: KClass<out TaskExecutor>
+        private val taskInfo: TaskInfo
     ) : TaskExecutor {
 
         override suspend fun execute(
@@ -149,19 +161,26 @@ open class RemoteTaskExecutor : ContentProvider() {
                     }
                 }
                 val bundle = Bundle()
+                bundle.putString(NAME_KEY, taskInfo.name)
+                bundle.putString(TYPE_KEY, taskInfo.type.qualifiedName)
+                bundle.putString(PROCESS_KEY, taskInfo.process)
+                bundle.putStringArrayList(
+                    DEPENDENCIES_KEY,
+                    taskInfo.dependencies.mapTo(ArrayList(taskInfo.dependencies.size)) { it.qualifiedName }
+                )
                 val args = Bundle()
                 for (k in results.keySet()) {
                     args.putParcelable(k, results[k])
                 }
                 BundleCompat.putBinder(bundle, BINDER_KEY, callback)
                 bundle.putBundle(ARGS_KEY, args)
-                val result = application.contentResolver.call(
-                    Uri.parse("content://${application.packageName}.remote-task-executor${process}"),
-                    type.qualifiedName ?: throw AssertionError(),
+                binder = application.contentResolver.call(
+                    Uri.parse("content://${application.packageName}.remote-task-executor${taskInfo.process}"),
+                    "",
                     null,
                     bundle
-                ) ?: throw AssertionError()
-                binder = BundleCompat.getBinder(result, BINDER_KEY) ?: throw AssertionError()
+                )?.let { BundleCompat.getBinder(it, BINDER_KEY) }
+                    ?: throw RemoteException("unknown")
                 if (!isCompleted.get()) {
                     binder.linkToDeath(callback, 0)
                 }
