@@ -219,10 +219,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 }
                 val task = it.next()
                 userTasks.add(task)
-                if (task.executor == TaskExecutorType.Main
-                    || task.executor == TaskExecutorType.Await
-                    || task.executor == TaskExecutorType.RemoteAwait
-                ) {
+                if (task.isAwait) {
                     if (mainThreadAwaitDependencies == null) {
                         mainThreadAwaitDependencies = ArrayList(128)
                     }

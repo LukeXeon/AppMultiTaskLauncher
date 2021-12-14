@@ -16,12 +16,25 @@ abstract class TaskInfo(
     internal inline val isMainThread: Boolean
         get() = executor == TaskExecutorType.Main
 
-    internal suspend inline fun execute(
+    internal inline val isAwait: Boolean
+        get() {
+            return executor == TaskExecutorType.Main
+                    || executor == TaskExecutorType.Await
+                    || executor == TaskExecutorType.RemoteAwait
+        }
+
+    private val isRemote: Boolean
+        get() {
+            return executor == TaskExecutorType.RemoteAwait
+                    || executor == TaskExecutorType.RemoteAsync
+        }
+
+    internal suspend fun execute(
         application: Application,
         results: TaskResults,
         direct: Boolean = false
     ): Parcelable? {
-        return if (!direct && executor == TaskExecutorType.RemoteAsync) {
+        return if (!direct && isRemote) {
             RemoteTaskExecutor.Client(process, type)
                 .execute(application, results)
         } else {
