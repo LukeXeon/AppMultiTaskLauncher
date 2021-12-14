@@ -1,12 +1,10 @@
 package open.source.multitask
 
 import android.os.Looper
-import android.os.Process
 import androidx.core.os.HandlerCompat
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.concurrent.thread
 
 internal class ExclusiveMainThreadExecutor : AbstractExecutorService(),
     ScheduledExecutorService {
@@ -50,15 +48,7 @@ internal class ExclusiveMainThreadExecutor : AbstractExecutorService(),
         override fun run() {
             if (isRunning) {
                 mainThread.postAtFrontOfQueue(this)
-                var action = queue.poll()
-                if (action != null) {
-                    action.run()
-                } else {
-                    action = queue.peek()
-                    if (action == null || action.getDelay(TimeUnit.NANOSECONDS) > 0) {
-                        Thread.yield()
-                    }
-                }
+                queue.poll()?.run()
             } else {
                 mainThread.removeCallbacks(this)
             }

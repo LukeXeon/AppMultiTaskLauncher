@@ -129,12 +129,12 @@ class MultiTask @JvmOverloads @MainThread constructor(
         }
     }
 
-    private suspend fun onUnlockMainThread(time: Long) {
+    private suspend fun unlockMainThread(time: Long) {
         mainThread.close()
         tracker.onUnlockMainThread(time)
     }
 
-    private suspend fun onStartupFinished(time: Long) {
+    private suspend fun startupFinished(time: Long) {
         tracker.onStartupFinished(time)
     }
 
@@ -144,7 +144,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             application: Application,
             results: TaskResults
         ): Parcelable? {
-            onUnlockMainThread(SystemClock.uptimeMillis() - start)
+            unlockMainThread(SystemClock.uptimeMillis() - start)
             return null
         }
     }
@@ -154,7 +154,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             application: Application,
             results: TaskResults
         ): Parcelable? {
-            onStartupFinished(SystemClock.uptimeMillis() - start)
+            startupFinished(SystemClock.uptimeMillis() - start)
             return null
         }
 
@@ -232,8 +232,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
             if (userTasks.isNullOrEmpty()) {
                 val time = SystemClock.uptimeMillis() - start
-                onUnlockMainThread(time)
-                onStartupFinished(time)
+                unlockMainThread(time)
+                startupFinished(time)
                 return@launch
             }
 
@@ -246,7 +246,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
             if (!mainThreadAwaitDependencies.isNullOrEmpty()) {
                 val unlockMainThreadTask = object : InternalTaskInfo(
                     UnlockMainThreadTask::class,
-                    mainThreadAwaitDependencies
+                    mainThreadAwaitDependencies,
+                    TaskExecutorType.Main
                 ) {
                     override fun newInstance(): TaskExecutor {
                         return UnlockMainThreadTask(start)
@@ -255,7 +256,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 }
                 graph.add(unlockMainThreadTask)
             } else {
-                onUnlockMainThread(SystemClock.uptimeMillis() - start)
+                unlockMainThread(SystemClock.uptimeMillis() - start)
             }
 
             val startupFinishedTask = object : InternalTaskInfo(
