@@ -12,7 +12,7 @@ internal class BundleTaskResults(private val bundle: Bundle) : TaskResults {
         return bundle.containsKey(name)
     }
 
-    override fun toBundle(): Bundle {
-        return bundle
+    override fun keySet(): Set<String> {
+        return bundle.keySet()
     }
 }

@@ -98,8 +98,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     private fun startJob(
         task: TaskInfo,
-        resultsMap: MutableMap<String, Parcelable>,
-        results: TaskResults,
+        results: ConcurrentTaskResults,
         dependencies: List<Job>
     ): Job {
         return GlobalScope.launch(if (task.isMainThread) mainThread else BACKGROUND_THREAD) {
@@ -125,7 +124,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             }
             val key = task.type.qualifiedName
             if (!key.isNullOrEmpty()) {
-                resultsMap[key] = result ?: NullMarker
+                results.map[key] = result ?: Unit
             }
         }
     }
@@ -164,8 +163,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
     private fun startByTopologicalSort(graph: Map<KClass<out TaskExecutor>, TaskInfo>) {
         val unmarked = ArrayList<TaskInfo>(graph.size)
         val temporaryMarked = ArraySet<TaskInfo>(graph.size)
-        val resultsMap = ConcurrentHashMap<String, Parcelable>(graph.size)
-        val results = MapTaskResults(resultsMap)
+        val results = ConcurrentTaskResults(graph.size)
         // sorted list modify to map ↓
         val jobs = ArrayMap<KClass<out TaskExecutor>, Job>(graph.size)
         fun visit(node: TaskInfo) {
@@ -187,14 +185,12 @@ class MultiTask @JvmOverloads @MainThread constructor(
             if (node.dependencies.isEmpty()) {
                 jobs[node.type] = startJob(
                     node,
-                    resultsMap,
                     results,
                     emptyList()
                 )
             } else {
                 jobs[node.type] = startJob(
                     node,
-                    resultsMap,
                     results,
                     node.dependencies.map { jobs.getValue(it) }
                 )

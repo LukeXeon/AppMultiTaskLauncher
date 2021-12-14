@@ -1,10 +1,11 @@
 package open.source.multitask
 
-import android.os.Bundle
 import android.os.Parcelable
 import kotlin.reflect.KClass
 
 interface TaskResults {
+    fun keySet(): Set<String>
+
     operator fun get(name: String): Parcelable?
 
     operator fun get(key: KClass<out TaskExecutor>): Parcelable? {
@@ -16,6 +17,4 @@ interface TaskResults {
     fun containsKey(key: KClass<out TaskExecutor>): Boolean {
         return containsKey(key.qualifiedName ?: "")
     }
-
-    fun toBundle(): Bundle
 }

@@ -153,7 +153,10 @@ open class RemoteTaskExecutor : ContentProvider() {
                     }
                 }
                 val bundle = Bundle()
-                val args = results.toBundle()
+                val args = Bundle()
+                for (k in results.keySet()) {
+                    args.putParcelable(k, results[k])
+                }
                 BundleCompat.putBinder(bundle, BINDER_KEY, callback)
                 bundle.putBundle(ARGS_KEY, args)
                 val result = application.contentResolver.call(
