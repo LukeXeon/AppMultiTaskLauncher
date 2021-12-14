@@ -8,10 +8,10 @@ import android.net.Uri
 import android.os.*
 import androidx.collection.ArrayMap
 import androidx.core.app.BundleCompat
-import kotlinx.coroutines.*
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -39,14 +39,6 @@ open class RemoteTaskExecutor : ContentProvider() {
 
     private val holdersMutex = Mutex()
     private val holders = ArrayMap<String, MutexResultHolder>()
-    private val serviceLoader by lazy {
-        ServiceLoader.load(TaskInfo::class.java, classLoader)
-    }
-    private val application by lazy {
-        context?.applicationContext as Application
-    }
-    open val classLoader: ClassLoader?
-        get() = javaClass.classLoader
 
     final override fun onCreate(): Boolean {
         return true
@@ -59,16 +51,20 @@ open class RemoteTaskExecutor : ContentProvider() {
     ): Bundle? {
         extras ?: return null
         val args = extras.getBundle(ARGS_KEY) ?: return null
+        val application = context?.applicationContext as? Application ?: return null
         val callback = IRemoteTaskCallback.Stub
             .asInterface(BundleCompat.getBinder(extras, BINDER_KEY))
-        val results = BundleTaskResults(args)
-        serviceLoader.find { it.type.qualifiedName == method } ?: return null
-        val taskInfo = serviceLoader.find { it.type.qualifiedName == method } ?: return null
         GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {
-            val holder = holdersMutex.withLock {
-                holders.getOrPut(method) { MutexResultHolder() }
-            }
             try {
+                MultiTask.loadModules(application)
+                val results = BundleTaskResults(args)
+                val taskInfo = MultiTask.TASKS.find { it.type.qualifiedName == method }
+                    ?: throw ClassNotFoundException("task class $method not found " + MultiTask.TASKS.joinToString {
+                        it.type.qualifiedName ?: ""
+                    })
+                val holder = holdersMutex.withLock {
+                    holders.getOrPut(method) { MutexResultHolder() }
+                }
                 holder.mutex.withLock {
                     var value = holder.value
                     if (value == null) {
@@ -164,7 +160,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                     type.qualifiedName ?: throw AssertionError(),
                     null,
                     bundle
-                )!!
+                ) ?: throw AssertionError()
                 binder = BundleCompat.getBinder(result, BINDER_KEY) ?: throw AssertionError()
                 if (!isCompleted.get()) {
                     binder.linkToDeath(callback, 0)

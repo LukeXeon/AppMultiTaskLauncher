@@ -20,4 +20,4 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
--keep public class * extends open.source.multitask.TaskInfo
+-keepnames public class * extends open.source.multitask.ModuleInfo

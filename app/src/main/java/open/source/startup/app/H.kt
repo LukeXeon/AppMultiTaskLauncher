@@ -12,6 +12,6 @@ class H : UncaughtExceptionHandler {
         task: KClass<out TaskExecutor>,
         e: Throwable
     ): Parcelable? {
-        TODO("Not yet implemented")
+        throw e
     }
 }

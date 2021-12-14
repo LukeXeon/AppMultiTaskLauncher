@@ -9,8 +9,9 @@ import android.util.Log
 import androidx.annotation.MainThread
 import androidx.collection.ArrayMap
 import androidx.collection.ArraySet
-import androidx.core.os.TraceCompat
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import open.source.multitask.annotations.TaskExecutorType
 import java.util.*
 import java.util.concurrent.*
@@ -24,8 +25,7 @@ import kotlin.reflect.KClass
 class MultiTask @JvmOverloads @MainThread constructor(
     private val application: Application,
     private val tracker: TaskTracker = TaskTracker.Default,
-    private val defaultUncaughtExceptionHandler: UncaughtExceptionHandler = UncaughtExceptionHandler.Default,
-    private val classLoader: ClassLoader? = application.classLoader
+    private val defaultUncaughtExceptionHandler: UncaughtExceptionHandler = UncaughtExceptionHandler.Default
 ) {
     companion object {
         private const val TAG = "MultiTask"
@@ -65,9 +65,32 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 )
             }.asCoroutineDispatcher()
         }
+        internal val TASKS = ArrayList<TaskInfo>(128)
+        private val HANDLERS = ArrayMap<KClass<out TaskExecutor>, HandlerInfo>(128)
+        private val LOAD_MUTEX = Mutex()
 
         private fun MutableMap<KClass<out TaskExecutor>, TaskInfo>.add(task: TaskInfo) {
             put(task.type, task)
+        }
+
+        internal suspend fun loadModules(application: Application) {
+            LOAD_MUTEX.withLock {
+                if (TASKS.isEmpty() && HANDLERS.isEmpty) {
+                    val it = ServiceLoader.load(ModuleInfo::class.java, application.classLoader)
+                        .iterator()
+                    while (it.hasNext()) {
+                        val module = it.next()
+                        TASKS.addAll(module.tasks)
+                        for (handler in module.handlers) {
+                            val h = HANDLERS[handler.taskType]
+                            if (h != null && h.priority >= handler.priority) {
+                                continue
+                            }
+                            HANDLERS[handler.taskType] = handler
+                        }
+                    }
+                }
+            }
         }
 
         @JvmStatic
@@ -89,12 +112,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
     )
     private val mainThread = ExclusiveMainThreadExecutor()
         .asCoroutineDispatcher()
-    private val handlers by lazy {
-        ServiceLoader.load(
-            HandlerInfo::class.java,
-            classLoader
-        )
-    }
+
 
     private fun startJob(
         task: TaskInfo,
@@ -112,10 +130,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
             val result = try {
                 task.execute(application, results)
             } catch (e: Throwable) {
-                val uncaughtExceptionHandler = handlers.asSequence()
-                    .filter { it.taskType == task.type }
-                    .maxByOrNull { it.priority }
-                    ?.newInstance() ?: defaultUncaughtExceptionHandler
+                val uncaughtExceptionHandler = HANDLERS[task.type]?.newInstance()
+                    ?: defaultUncaughtExceptionHandler
                 uncaughtExceptionHandler.handleException(task.type, e)
             }
             val time = SystemClock.uptimeMillis() - start
@@ -208,26 +224,16 @@ class MultiTask @JvmOverloads @MainThread constructor(
         val start = SystemClock.uptimeMillis()
         Log.d(TAG, "begin invoke startup")
         GlobalScope.launch(BACKGROUND_THREAD) {
-            TraceCompat.beginSection(TAG)
-            val it = ServiceLoader.load(TaskInfo::class.java, classLoader)
-                .iterator()
-            var userTasks: MutableMap<KClass<out TaskExecutor>, TaskInfo>? = null
-            var mainThreadAwaitDependencies: ArrayList<KClass<out TaskExecutor>>? = null
-            while (it.hasNext()) {
-                if (userTasks == null) {
-                    userTasks = ArrayMap(128)
-                }
-                val task = it.next()
-                userTasks.add(task)
+            loadModules(application)
+            val tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo> = ArrayMap(TASKS.size)
+            val mainThreadAwaitDependencies = ArrayList<KClass<out TaskExecutor>>(TASKS.size)
+            for (task in TASKS) {
+                tasks[task.type] = task
                 if (task.isAwait) {
-                    if (mainThreadAwaitDependencies == null) {
-                        mainThreadAwaitDependencies = ArrayList(128)
-                    }
                     mainThreadAwaitDependencies.add(task.type)
                 }
             }
-
-            if (userTasks.isNullOrEmpty()) {
+            if (tasks.isNullOrEmpty()) {
                 val time = SystemClock.uptimeMillis() - start
                 unlockMainThread(time)
                 startupFinished(time)
@@ -235,10 +241,9 @@ class MultiTask @JvmOverloads @MainThread constructor(
             }
 
             val graph = ArrayMap<KClass<out TaskExecutor>, TaskInfo>(
-                userTasks.size + internalTasks.size
+                tasks.size + internalTasks.size
             )
-
-            graph.putAll(userTasks)
+            graph.putAll(tasks)
 
             if (!mainThreadAwaitDependencies.isNullOrEmpty()) {
                 val unlockMainThreadTask = object : InternalTaskInfo(
@@ -258,7 +263,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
             val startupFinishedTask = object : InternalTaskInfo(
                 StartupFinishedTask::class,
-                userTasks.keys
+                tasks.keys
             ) {
                 override fun newInstance(): TaskExecutor {
                     return StartupFinishedTask(start)
@@ -266,9 +271,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             }
             graph.add(startupFinishedTask)
             startByTopologicalSort(graph)
-            TraceCompat.endSection()
             Log.d(TAG, "end invoke startup, use time: ${SystemClock.uptimeMillis() - start}")
         }
     }
-
 }

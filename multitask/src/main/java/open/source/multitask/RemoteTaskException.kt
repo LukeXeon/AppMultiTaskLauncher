@@ -16,7 +16,7 @@ class RemoteTaskException(
     }
 
     constructor(throwable: Throwable) : this(
-        "remote exception: " + throwable.javaClass.name,
+        "remote exception: ${throwable.javaClass.name}, message: ${throwable.message}",
         throwable.stackTrace
     )
 
