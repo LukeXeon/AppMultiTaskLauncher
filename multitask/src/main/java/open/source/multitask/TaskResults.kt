@@ -4,7 +4,9 @@ import android.os.Parcelable
 import kotlin.reflect.KClass
 
 interface TaskResults {
-    fun keySet(): Set<String>
+    val keys: Set<String>
+
+    val size: Int
 
     operator fun get(name: String): Parcelable?
 
@@ -12,7 +14,7 @@ interface TaskResults {
         return get(key.qualifiedName ?: "")
     }
 
-    fun containsKey(name: String?): Boolean
+    fun containsKey(name: String): Boolean
 
     fun containsKey(key: KClass<out TaskExecutor>): Boolean {
         return containsKey(key.qualifiedName ?: "")

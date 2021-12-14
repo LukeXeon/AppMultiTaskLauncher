@@ -10,11 +10,13 @@ internal class ConcurrentTaskResults(initialCapacity: Int) : TaskResults {
         return map[name] as? Parcelable
     }
 
-    override fun containsKey(name: String?): Boolean {
+    override fun containsKey(name: String): Boolean {
         return map.containsKey(name)
     }
 
-    override fun keySet(): Set<String> {
-        return map.keys
-    }
+    override val size: Int
+        get() = map.size
+
+    override val keys: Set<String>
+        get() = map.keys
 }

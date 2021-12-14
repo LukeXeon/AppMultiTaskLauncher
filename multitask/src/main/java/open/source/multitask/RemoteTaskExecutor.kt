@@ -3,6 +3,7 @@ package open.source.multitask
 import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.*
@@ -27,21 +28,44 @@ open class RemoteTaskExecutor : ContentProvider() {
         private const val TYPE_KEY = "type"
         private const val PROCESS_KEY = "process"
         private const val DEPENDENCIES_KEY = "dependencies"
-        private const val ARGS_KEY = "args"
+        private const val RESULTS_KEY = "results"
         private val ALIVE_BINDER = Bundle().apply {
             BundleCompat.putBinder(this, BINDER_KEY, Binder())
         }
+        private val STATES_MUTEX = Mutex()
+        private val STATES = ArrayMap<String, TaskState>()
+        private val EXECUTORS_MUTEX = Mutex()
+        private lateinit var EXECUTORS: Map<String, Uri>
+        private suspend fun getExecutors(application: Application): Map<String, Uri> {
+            EXECUTORS_MUTEX.withLock {
+                if (!::EXECUTORS.isInitialized) {
+                    EXECUTORS = application.packageManager
+                        .getPackageInfo(
+                            application.packageName,
+                            PackageManager.GET_PROVIDERS
+                        )
+                        .providers.asSequence()
+                        .filter {
+                            !it.multiprocess
+                        }.filter {
+                            val other = runCatching {
+                                Class.forName(it.name, false, application.classLoader)
+                            }.getOrNull()
+                            other != null && RemoteTaskExecutor::class.java.isAssignableFrom(other)
+                        }.map {
+                            it.processName to Uri.parse("content://${it.authority}")
+                        }.toMap()
+                }
+            }
+            return EXECUTORS
+        }
     }
 
-    internal class MutexResultHolder {
+    internal class TaskState {
         val mutex = Mutex()
 
-        @Volatile
-        var value: RemoteTaskResult? = null
+        var result: RemoteTaskResult? = null
     }
-
-    private val holdersMutex = Mutex()
-    private val holders = ArrayMap<String, MutexResultHolder>()
 
     final override fun onCreate(): Boolean {
         return true
@@ -54,19 +78,19 @@ open class RemoteTaskExecutor : ContentProvider() {
     ): Bundle? {
         extras ?: return null
         val application = context?.applicationContext as? Application ?: return null
+        extras.classLoader = application.classLoader
+        val results = extras.getParcelable<ParcelTaskResults>(RESULTS_KEY) ?: return null
         val name = extras.getString(NAME_KEY)
         val process = extras.getString(PROCESS_KEY)
         val type = extras.getString(TYPE_KEY)
         val dependencies = extras.getStringArrayList(DEPENDENCIES_KEY) ?: emptyList<String>()
-        val args = extras.getBundle(ARGS_KEY) ?: Bundle.EMPTY
-        val results = BundleTaskResults(args)
         val callback = IRemoteTaskCallback.Stub.asInterface(
             BundleCompat.getBinder(extras, BINDER_KEY)
         )
         GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {
             try {
-                MultiTask.loadModules(application)
-                val taskInfo = MultiTask.TASKS.find {
+                val (tasks) = ModulesInfo.get(application)
+                val taskInfo = tasks.find {
                     it.name == name && it.process == process
                             && it.type.qualifiedName == type
                             && it.dependencies.all { c ->
@@ -75,11 +99,11 @@ open class RemoteTaskExecutor : ContentProvider() {
                         )
                     }
                 } ?: throw ClassNotFoundException("task class $type not found ")
-                val holder = holdersMutex.withLock {
-                    holders.getOrPut(type) { MutexResultHolder() }
+                val state = STATES_MUTEX.withLock {
+                    STATES.getOrPut(type) { TaskState() }
                 }
-                holder.mutex.withLock {
-                    var value = holder.value
+                state.mutex.withLock {
+                    var value = state.result
                     if (value == null) {
                         value = RemoteTaskResult(
                             taskInfo.execute(
@@ -88,7 +112,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                                 direct = true
                             )
                         )
-                        holder.value = value
+                        state.result = value
                     }
                     callback.onCompleted(value)
                 }
@@ -135,6 +159,8 @@ open class RemoteTaskExecutor : ContentProvider() {
             application: Application,
             results: TaskResults
         ): Parcelable? {
+            val path = getExecutors(application)
+                .getValue(application.packageName + taskInfo.process)
             return suspendCoroutine { continuation ->
                 var binder by Delegates.notNull<IBinder>()
                 val isCompleted = AtomicBoolean()
@@ -168,14 +194,10 @@ open class RemoteTaskExecutor : ContentProvider() {
                     DEPENDENCIES_KEY,
                     taskInfo.dependencies.mapTo(ArrayList(taskInfo.dependencies.size)) { it.qualifiedName }
                 )
-                val args = Bundle()
-                for (k in results.keySet()) {
-                    args.putParcelable(k, results[k])
-                }
                 BundleCompat.putBinder(bundle, BINDER_KEY, callback)
-                bundle.putBundle(ARGS_KEY, args)
+                bundle.putParcelable(RESULTS_KEY, ParcelTaskResults(results))
                 binder = application.contentResolver.call(
-                    Uri.parse("content://${application.packageName}.remote-task-executor${taskInfo.process}"),
+                    path,
                     "",
                     null,
                     bundle

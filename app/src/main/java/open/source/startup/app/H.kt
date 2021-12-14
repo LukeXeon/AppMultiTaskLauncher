@@ -1,5 +1,6 @@
 package open.source.startup.app
 
+import android.app.Application
 import android.os.Parcelable
 import open.source.multitask.TaskExecutor
 import open.source.multitask.UncaughtExceptionHandler
@@ -9,6 +10,7 @@ import kotlin.reflect.KClass
 @TaskUncaughtExceptionHandler(RemoteTask::class)
 class H : UncaughtExceptionHandler {
     override suspend fun handleException(
+        application: Application,
         task: KClass<out TaskExecutor>,
         e: Throwable
     ): Parcelable? {

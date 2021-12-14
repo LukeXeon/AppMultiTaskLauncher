@@ -10,8 +10,6 @@ import androidx.annotation.MainThread
 import androidx.collection.ArrayMap
 import androidx.collection.ArraySet
 import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import open.source.multitask.annotations.TaskExecutorType
 import java.util.*
 import java.util.concurrent.*
@@ -65,32 +63,9 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 )
             }.asCoroutineDispatcher()
         }
-        internal val TASKS = ArrayList<TaskInfo>(128)
-        private val HANDLERS = ArrayMap<KClass<out TaskExecutor>, HandlerInfo>(128)
-        private val LOAD_MUTEX = Mutex()
 
         private fun MutableMap<KClass<out TaskExecutor>, TaskInfo>.add(task: TaskInfo) {
             put(task.type, task)
-        }
-
-        internal suspend fun loadModules(application: Application) {
-            LOAD_MUTEX.withLock {
-                if (TASKS.isEmpty() && HANDLERS.isEmpty) {
-                    val it = ServiceLoader.load(ModuleInfo::class.java, application.classLoader)
-                        .iterator()
-                    while (it.hasNext()) {
-                        val module = it.next()
-                        TASKS.addAll(module.tasks)
-                        for (handler in module.handlers) {
-                            val h = HANDLERS[handler.taskType]
-                            if (h != null && h.priority >= handler.priority) {
-                                continue
-                            }
-                            HANDLERS[handler.taskType] = handler
-                        }
-                    }
-                }
-            }
         }
 
         @JvmStatic
@@ -130,9 +105,9 @@ class MultiTask @JvmOverloads @MainThread constructor(
             val result = try {
                 task.execute(application, results)
             } catch (e: Throwable) {
-                val uncaughtExceptionHandler = HANDLERS[task.type]?.newInstance()
-                    ?: defaultUncaughtExceptionHandler
-                uncaughtExceptionHandler.handleException(task.type, e)
+                val uncaughtExceptionHandler = ModulesInfo.get(application)
+                    .handlers[task.type]?.newInstance() ?: defaultUncaughtExceptionHandler
+                uncaughtExceptionHandler.handleException(application, task.type, e)
             }
             val time = SystemClock.uptimeMillis() - start
             if (!isInternalTask) {
@@ -224,10 +199,11 @@ class MultiTask @JvmOverloads @MainThread constructor(
         val start = SystemClock.uptimeMillis()
         Log.d(TAG, "begin invoke startup")
         GlobalScope.launch(BACKGROUND_THREAD) {
-            loadModules(application)
-            val tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo> = ArrayMap(TASKS.size)
-            val mainThreadAwaitDependencies = ArrayList<KClass<out TaskExecutor>>(TASKS.size)
-            for (task in TASKS) {
+            val modules = ModulesInfo.get(application)
+            val tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo> = ArrayMap(modules.tasks.size)
+            val mainThreadAwaitDependencies =
+                ArrayList<KClass<out TaskExecutor>>(modules.tasks.size)
+            for (task in modules.tasks) {
                 tasks[task.type] = task
                 if (task.isAwait) {
                     mainThreadAwaitDependencies.add(task.type)
