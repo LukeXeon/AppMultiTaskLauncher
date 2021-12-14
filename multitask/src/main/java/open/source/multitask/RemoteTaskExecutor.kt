@@ -13,6 +13,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import open.source.multitask.annotations.TaskExecutorType
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -25,6 +26,7 @@ open class RemoteTaskExecutor : ContentProvider() {
     companion object {
         private const val BINDER_KEY = "binder"
         private const val NAME_KEY = "name"
+        private const val IS_ASYNC_KEY = "is_async"
         private const val TYPE_KEY = "type"
         private const val PROCESS_KEY = "process"
         private const val DEPENDENCIES_KEY = "dependencies"
@@ -80,6 +82,10 @@ open class RemoteTaskExecutor : ContentProvider() {
         val application = context?.applicationContext as? Application ?: return null
         extras.classLoader = application.classLoader
         val results = extras.getParcelable<ParcelTaskResults>(RESULTS_KEY) ?: return null
+        val executor = if (extras.getBoolean(IS_ASYNC_KEY))
+            TaskExecutorType.RemoteAsync
+        else
+            TaskExecutorType.RemoteAwait
         val name = extras.getString(NAME_KEY)
         val process = extras.getString(PROCESS_KEY)
         val type = extras.getString(TYPE_KEY)
@@ -91,7 +97,7 @@ open class RemoteTaskExecutor : ContentProvider() {
             try {
                 val (tasks) = ModulesInfo.get(application)
                 val taskInfo = tasks.find {
-                    it.name == name && it.process == process
+                    it.executor == executor && it.name == name && it.process == process
                             && it.type.qualifiedName == type
                             && it.dependencies.all { c ->
                         dependencies.contains(
@@ -188,6 +194,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                 }
                 val bundle = Bundle()
                 bundle.putString(NAME_KEY, taskInfo.name)
+                bundle.putBoolean(IS_ASYNC_KEY, taskInfo.executor == TaskExecutorType.RemoteAsync)
                 bundle.putString(TYPE_KEY, taskInfo.type.qualifiedName)
                 bundle.putString(PROCESS_KEY, taskInfo.process)
                 bundle.putStringArrayList(
