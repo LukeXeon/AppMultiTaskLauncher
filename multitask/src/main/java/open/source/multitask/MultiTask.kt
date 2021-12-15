@@ -91,7 +91,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     private fun startJob(
         task: TaskInfo,
-        results: ConcurrentTaskResults,
+        results: MutableMap<KClass<out TaskExecutor>, Parcelable>,
         dependencies: List<Job>
     ): Job {
         return GlobalScope.launch(if (task.isMainThread) mainThread else BACKGROUND_THREAD) {
@@ -113,9 +113,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
             if (!isInternalTask) {
                 tracker.onTaskFinished(name, time)
             }
-            val key = task.type.qualifiedName
-            if (!key.isNullOrEmpty()) {
-                results.map[key] = result ?: Unit
+            if (result != null) {
+                results[task.type] = result
             }
         }
     }
@@ -133,7 +132,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
         override suspend fun execute(
             application: Application,
-            results: TaskResults
+            results: Map<KClass<out TaskExecutor>, Parcelable>
         ): Parcelable? {
             unlockMainThread(SystemClock.uptimeMillis() - start)
             return null
@@ -143,7 +142,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
     internal inner class StartupFinishedTask(private val start: Long) : TaskExecutor {
         override suspend fun execute(
             application: Application,
-            results: TaskResults
+            results: Map<KClass<out TaskExecutor>, Parcelable>
         ): Parcelable? {
             startupFinished(SystemClock.uptimeMillis() - start)
             return null
@@ -154,7 +153,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
     private fun startByTopologicalSort(graph: Map<KClass<out TaskExecutor>, TaskInfo>) {
         val unmarked = ArrayList<TaskInfo>(graph.size)
         val temporaryMarked = ArraySet<TaskInfo>(graph.size)
-        val results = ConcurrentTaskResults(graph.size)
+        val results = ConcurrentHashMap<KClass<out TaskExecutor>, Parcelable>(graph.size)
         // sorted list modify to map ↓
         val jobs = ArrayMap<KClass<out TaskExecutor>, Job>(graph.size)
         fun visit(node: TaskInfo) {

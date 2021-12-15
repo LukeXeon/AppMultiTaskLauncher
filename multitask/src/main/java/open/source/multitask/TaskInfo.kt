@@ -31,7 +31,7 @@ abstract class TaskInfo(
 
     internal suspend fun execute(
         application: Application,
-        results: TaskResults,
+        results: Map<KClass<out TaskExecutor>, Parcelable>,
         direct: Boolean = false
     ): Parcelable? {
         return if (!direct && isRemote) {

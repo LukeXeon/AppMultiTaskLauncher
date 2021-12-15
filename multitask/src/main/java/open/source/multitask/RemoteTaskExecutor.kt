@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
+import kotlin.reflect.KClass
 
 
 open class RemoteTaskExecutor : ContentProvider() {
@@ -67,7 +68,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                 isAsync: Boolean,
                 process: String,
                 dependencies: List<String>,
-                results: ParcelTaskResults,
+                results: List<ParcelKeyValue>,
                 callback: IRemoteTaskCallback
             ) {
                 val application = context?.applicationContext as? Application
@@ -91,10 +92,26 @@ open class RemoteTaskExecutor : ContentProvider() {
                                 )
                             }
                         } ?: throw ClassNotFoundException("task class $type not found ")
+                        val types = tasks.asIterable()
+                            .map { it.type.qualifiedName to it.type }
+                            .toMap()
+                        val map = ArrayMap<KClass<out TaskExecutor>, Parcelable>(results.size)
+                        for ((k, v) in results) {
+                            val t = types[k]
+                            if (t != null) {
+                                map[t] = v
+                            }
+                        }
                         val state = STATES_MUTEX.withLock {
                             STATES.getOrPut(type) { TaskState() }
                         }
-                        callback.onCompleted(state.execute(application, results, taskInfo))
+                        callback.onCompleted(
+                            state.execute(
+                                application,
+                                map,
+                                taskInfo
+                            )
+                        )
                     } catch (e: Throwable) {
                         callback.onException(RemoteTaskException(e))
                     }
@@ -141,7 +158,7 @@ open class RemoteTaskExecutor : ContentProvider() {
 
         internal suspend fun execute(
             application: Application,
-            results: TaskResults,
+            results: Map<KClass<out TaskExecutor>, Parcelable>,
             taskInfo: TaskInfo
         ): RemoteTaskResult {
             mutex.withLock {
@@ -207,7 +224,7 @@ open class RemoteTaskExecutor : ContentProvider() {
 
         override suspend fun execute(
             application: Application,
-            results: TaskResults
+            results: Map<KClass<out TaskExecutor>, Parcelable>
         ): Parcelable? {
             return broadcast(application, taskInfo.process) { service ->
                 suspendCoroutine { continuation ->
@@ -241,7 +258,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                         isAsync,
                         taskInfo.process,
                         taskInfo.dependencies.mapTo(ArrayList(taskInfo.dependencies.size)) { it.qualifiedName },
-                        ParcelTaskResults(results),
+                        results.map { ParcelKeyValue(it.key.qualifiedName, it.value) },
                         callback
                     )
                 }
