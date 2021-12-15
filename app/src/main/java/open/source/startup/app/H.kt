@@ -11,7 +11,6 @@ import kotlin.reflect.KClass
 class H : UncaughtExceptionHandler {
     override suspend fun handleException(
         application: Application,
-        task: KClass<out TaskExecutor>,
         e: Throwable
     ): Parcelable? {
         throw e

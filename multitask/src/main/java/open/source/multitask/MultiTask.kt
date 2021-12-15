@@ -107,7 +107,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             } catch (e: Throwable) {
                 val uncaughtExceptionHandler = ModulesInfo.get(application)
                     .handlers[task.type]?.newInstance() ?: defaultUncaughtExceptionHandler
-                uncaughtExceptionHandler.handleException(application, task.type, e)
+                uncaughtExceptionHandler.handleException(application, e)
             }
             val time = SystemClock.uptimeMillis() - start
             if (!isInternalTask) {

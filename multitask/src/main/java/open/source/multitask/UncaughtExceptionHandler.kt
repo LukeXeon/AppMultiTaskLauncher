@@ -7,14 +7,12 @@ import kotlin.reflect.KClass
 interface UncaughtExceptionHandler {
     suspend fun handleException(
         application: Application,
-        task: KClass<out TaskExecutor>,
         e: Throwable
     ): Parcelable?
 
     companion object Default : UncaughtExceptionHandler {
         override suspend fun handleException(
             application: Application,
-            task: KClass<out TaskExecutor>,
             e: Throwable
         ): Parcelable? {
             throw e
