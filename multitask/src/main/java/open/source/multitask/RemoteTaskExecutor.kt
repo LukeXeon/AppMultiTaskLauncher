@@ -18,30 +18,25 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
-import kotlin.properties.Delegates
 
 
 open class RemoteTaskExecutor : ContentProvider() {
 
     companion object {
         private const val BINDER_KEY = "binder"
-        private const val NAME_KEY = "name"
-        private const val IS_ASYNC_KEY = "is_async"
-        private const val TYPE_KEY = "type"
-        private const val PROCESS_KEY = "process"
-        private const val DEPENDENCIES_KEY = "dependencies"
-        private const val RESULTS_KEY = "results"
-        private val ALIVE_BINDER = Bundle().apply {
-            BundleCompat.putBinder(this, BINDER_KEY, Binder())
-        }
         private val STATES_MUTEX = Mutex()
-        private val STATES = ArrayMap<String, TaskState>()
-        private val EXECUTORS_MUTEX = Mutex()
-        private lateinit var EXECUTORS: Map<String, Uri>
-        private suspend fun getExecutors(application: Application): Map<String, Uri> {
-            EXECUTORS_MUTEX.withLock {
-                if (!::EXECUTORS.isInitialized) {
-                    EXECUTORS = application.packageManager
+        private val STATES = ArrayMap<String, TaskState>(128)
+        private val SERVICES_MUTEX = Mutex()
+        private val SERVICES = ArrayMap<String, ServiceConnection>(8)
+
+        private suspend fun <T> broadcast(
+            application: Application,
+            process: String,
+            action: suspend (IRemoteTaskExecutorService) -> T
+        ): T {
+            SERVICES_MUTEX.withLock {
+                if (SERVICES.isEmpty) {
+                    application.packageManager
                         .getPackageInfo(
                             application.packageName,
                             PackageManager.GET_PROVIDERS
@@ -55,18 +50,115 @@ open class RemoteTaskExecutor : ContentProvider() {
                             }.getOrNull()
                             other != null && RemoteTaskExecutor::class.java.isAssignableFrom(other)
                         }.map {
-                            it.processName to Uri.parse("content://${it.authority}")
-                        }.toMap()
+                            it.processName to ServiceConnection(Uri.parse("content://${it.authority}"))
+                        }.toMap(SERVICES)
                 }
             }
-            return EXECUTORS
+            val service = SERVICES.getValue(application.packageName + process)
+            return service.broadcast(application, action)
+        }
+    }
+
+    private val service = Bundle().apply {
+        BundleCompat.putBinder(this, BINDER_KEY, object : IRemoteTaskExecutorService.Stub() {
+            override fun execute(
+                name: String,
+                type: String,
+                isAsync: Boolean,
+                process: String,
+                dependencies: List<String>,
+                results: ParcelTaskResults,
+                callback: IRemoteTaskCallback
+            ) {
+                val application = context?.applicationContext as? Application
+                if (application == null) {
+                    callback.onException(RemoteTaskException(NullPointerException("application is null")))
+                    return
+                }
+                GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {
+                    try {
+                        val executor = if (isAsync)
+                            TaskExecutorType.RemoteAsync
+                        else
+                            TaskExecutorType.RemoteAwait
+                        val (tasks) = ModulesInfo.get(application)
+                        val taskInfo = tasks.find {
+                            it.executor == executor && it.name == name && it.process == process
+                                    && it.type.qualifiedName == type
+                                    && it.dependencies.all { c ->
+                                dependencies.contains(
+                                    c.qualifiedName
+                                )
+                            }
+                        } ?: throw ClassNotFoundException("task class $type not found ")
+                        val state = STATES_MUTEX.withLock {
+                            STATES.getOrPut(type) { TaskState() }
+                        }
+                        callback.onCompleted(state.execute(application, results, taskInfo))
+                    } catch (e: Throwable) {
+                        callback.onException(RemoteTaskException(e))
+                    }
+                }
+            }
+        })
+    }
+
+    internal class ServiceConnection(private val path: Uri) {
+        private val mutex = Mutex()
+        private val callback = RemoteCallbackList<IRemoteTaskExecutorService>()
+
+        suspend fun <T> broadcast(
+            application: Application,
+            action: suspend (IRemoteTaskExecutorService) -> T
+        ): T {
+            mutex.withLock {
+                try {
+                    val service = if (callback.beginBroadcast() == 1) {
+                        callback.getBroadcastItem(0)
+                    } else {
+                        IRemoteTaskExecutorService.Stub
+                            .asInterface(
+                                BundleCompat.getBinder(
+                                    application.contentResolver.call(path, "", null, null)!!,
+                                    BINDER_KEY
+                                )
+                            ).apply {
+                                callback.register(this)
+                            }
+                    }
+                    return action(service)
+                } finally {
+                    callback.finishBroadcast()
+                }
+            }
         }
     }
 
     internal class TaskState {
-        val mutex = Mutex()
+        private val mutex = Mutex()
 
-        var result: RemoteTaskResult? = null
+        private var result: RemoteTaskResult? = null
+
+        internal suspend fun execute(
+            application: Application,
+            results: TaskResults,
+            taskInfo: TaskInfo
+        ): RemoteTaskResult {
+            mutex.withLock {
+                var value = result
+                if (value == null) {
+                    value = RemoteTaskResult(
+                        taskInfo.execute(
+                            application,
+                            results,
+                            direct = true
+                        )
+                    )
+                    result = value
+                }
+                return value
+            }
+        }
     }
 
     final override fun onCreate(): Boolean {
@@ -77,56 +169,8 @@ open class RemoteTaskExecutor : ContentProvider() {
         method: String,
         arg: String?,
         extras: Bundle?
-    ): Bundle? {
-        extras ?: return null
-        val application = context?.applicationContext as? Application ?: return null
-        extras.classLoader = application.classLoader
-        val results = extras.getParcelable<ParcelTaskResults>(RESULTS_KEY) ?: return null
-        val executor = if (extras.getBoolean(IS_ASYNC_KEY))
-            TaskExecutorType.RemoteAsync
-        else
-            TaskExecutorType.RemoteAwait
-        val name = extras.getString(NAME_KEY)
-        val process = extras.getString(PROCESS_KEY)
-        val type = extras.getString(TYPE_KEY)
-        val dependencies = extras.getStringArrayList(DEPENDENCIES_KEY) ?: emptyList<String>()
-        val callback = IRemoteTaskCallback.Stub.asInterface(
-            BundleCompat.getBinder(extras, BINDER_KEY)
-        )
-        GlobalScope.launch(MultiTask.BACKGROUND_THREAD) {
-            try {
-                val (tasks) = ModulesInfo.get(application)
-                val taskInfo = tasks.find {
-                    it.executor == executor && it.name == name && it.process == process
-                            && it.type.qualifiedName == type
-                            && it.dependencies.all { c ->
-                        dependencies.contains(
-                            c.qualifiedName
-                        )
-                    }
-                } ?: throw ClassNotFoundException("task class $type not found ")
-                val state = STATES_MUTEX.withLock {
-                    STATES.getOrPut(type) { TaskState() }
-                }
-                state.mutex.withLock {
-                    var value = state.result
-                    if (value == null) {
-                        value = RemoteTaskResult(
-                            taskInfo.execute(
-                                application,
-                                results,
-                                direct = true
-                            )
-                        )
-                        state.result = value
-                    }
-                    callback.onCompleted(value)
-                }
-            } catch (e: Throwable) {
-                callback.onException(RemoteTaskException(e))
-            }
-        }
-        return ALIVE_BINDER
+    ): Bundle {
+        return service
     }
 
     final override fun query(
@@ -165,53 +209,41 @@ open class RemoteTaskExecutor : ContentProvider() {
             application: Application,
             results: TaskResults
         ): Parcelable? {
-            val path = getExecutors(application)
-                .getValue(application.packageName + taskInfo.process)
-            return suspendCoroutine { continuation ->
-                var binder by Delegates.notNull<IBinder>()
-                val isCompleted = AtomicBoolean()
-                val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
+            return broadcast(application, taskInfo.process) { service ->
+                suspendCoroutine { continuation ->
+                    val isCompleted = AtomicBoolean()
+                    val isAsync = taskInfo.executor == TaskExecutorType.RemoteAsync
+                    val callback = object : IRemoteTaskCallback.Stub(), IBinder.DeathRecipient {
+                        override fun onCompleted(result: RemoteTaskResult) {
+                            if (isCompleted.compareAndSet(false, true)) {
+                                service.asBinder().unlinkToDeath(this, 0)
+                                continuation.resume(result.value)
+                            }
+                        }
 
-                    override fun onCompleted(result: RemoteTaskResult) {
-                        if (isCompleted.compareAndSet(false, true)) {
-                            runCatching { binder.unlinkToDeath(this, 0) }
-                            continuation.resume(result.value)
+                        override fun onException(ex: RemoteTaskException) {
+                            if (isCompleted.compareAndSet(false, true)) {
+                                service.asBinder().unlinkToDeath(this, 0)
+                                continuation.resumeWithException(ex)
+                            }
+                        }
+
+                        override fun binderDied() {
+                            if (isCompleted.compareAndSet(false, true)) {
+                                continuation.resumeWithException(DeadObjectException())
+                            }
                         }
                     }
-
-                    override fun onException(ex: RemoteTaskException) {
-                        if (isCompleted.compareAndSet(false, true)) {
-                            runCatching { binder.unlinkToDeath(this, 0) }
-                            continuation.resumeWithException(ex)
-                        }
-                    }
-
-                    override fun binderDied() {
-                        if (isCompleted.compareAndSet(false, true)) {
-                            continuation.resumeWithException(DeadObjectException())
-                        }
-                    }
-                }
-                val bundle = Bundle()
-                bundle.putString(NAME_KEY, taskInfo.name)
-                bundle.putBoolean(IS_ASYNC_KEY, taskInfo.executor == TaskExecutorType.RemoteAsync)
-                bundle.putString(TYPE_KEY, taskInfo.type.qualifiedName)
-                bundle.putString(PROCESS_KEY, taskInfo.process)
-                bundle.putStringArrayList(
-                    DEPENDENCIES_KEY,
-                    taskInfo.dependencies.mapTo(ArrayList(taskInfo.dependencies.size)) { it.qualifiedName }
-                )
-                BundleCompat.putBinder(bundle, BINDER_KEY, callback)
-                bundle.putParcelable(RESULTS_KEY, ParcelTaskResults(results))
-                binder = application.contentResolver.call(
-                    path,
-                    "",
-                    null,
-                    bundle
-                )?.let { BundleCompat.getBinder(it, BINDER_KEY) }
-                    ?: throw RemoteException("unknown")
-                if (!isCompleted.get()) {
-                    binder.linkToDeath(callback, 0)
+                    service.asBinder().linkToDeath(callback, 0)
+                    service.execute(
+                        taskInfo.name,
+                        taskInfo.type.qualifiedName,
+                        isAsync,
+                        taskInfo.process,
+                        taskInfo.dependencies.mapTo(ArrayList(taskInfo.dependencies.size)) { it.qualifiedName },
+                        ParcelTaskResults(results),
+                        callback
+                    )
                 }
             }
         }
