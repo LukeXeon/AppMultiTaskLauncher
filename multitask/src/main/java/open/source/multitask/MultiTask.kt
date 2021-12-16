@@ -154,18 +154,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
         val start = SystemClock.uptimeMillis()
         GlobalScope.launch(BACKGROUND_THREAD) {
             val modules = BuildInModules.get(application)
-            val graph = ArrayMap<KClass<out TaskExecutor>, TaskInfo>(
-                modules.tasks.size
-            )
-            val mainThreadAwaitDependencies = ArrayList<KClass<out TaskExecutor>>(
-                modules.tasks.size
-            )
-            for (task in modules.tasks) {
-                graph[task.type] = task
-                if (task.isAwait) {
-                    mainThreadAwaitDependencies.add(task.type)
-                }
-            }
+            val graph = modules.tasks
+            val mainThreadAwaitDependencies = modules.awaitDependencies
             if (mainThreadAwaitDependencies.isEmpty()) {
                 mainThread.close()
                 tracker.onUnlockMainThread(SystemClock.uptimeMillis() - start)

@@ -26,22 +26,9 @@ open class RemoteTaskExecutor : ContentProvider() {
     companion object {
         private const val BINDER_KEY = "binder"
         private val STATES_MUTEX = Mutex()
-        private val STATES = ArrayMap<String, TaskState>(128)
+        private val STATES = ArrayMap<String, TaskState>(BuildInModules.PRE_ALLOC_SIZE)
         private val SERVICES_MUTEX = Mutex()
-        private val SERVICES = ArrayMap<String, ServiceConnection>(8)
-        private val TYPES_MUTEX = Mutex()
-        private lateinit var TYPES: Map<String?, KClass<out TaskExecutor>>
-
-        private suspend fun getTasks(application: Application): Pair<List<TaskInfo>, Map<String?, KClass<out TaskExecutor>>> {
-            val (tasks) = BuildInModules.get(application)
-            TYPES_MUTEX.withLock {
-                if (!::TYPES.isInitialized) {
-                    TYPES = tasks.map { it.type.qualifiedName to it.type }
-                        .toMap()
-                }
-            }
-            return tasks to TYPES
-        }
+        private val SERVICES = ArrayMap<String, ServiceConnection>(BuildInModules.PRE_ALLOC_SIZE)
 
         private suspend fun <T> broadcast(
             application: Application,
@@ -95,8 +82,10 @@ open class RemoteTaskExecutor : ContentProvider() {
                             TaskExecutorType.RemoteAsync
                         else
                             TaskExecutorType.RemoteAwait
-                        val (tasks, types) = getTasks(application)
-                        val taskInfo = tasks.find {
+                        val modules = BuildInModules.get(application)
+                        val tasks = modules.tasks
+                        val types = modules.taskTypes
+                        val taskInfo = tasks.values.find {
                             it.executor == executor && it.name == name && it.process == process
                                     && it.type.qualifiedName == type
                                     && it.dependencies.all { c ->

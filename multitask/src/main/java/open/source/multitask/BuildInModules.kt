@@ -9,10 +9,13 @@ import kotlin.collections.ArrayList
 import kotlin.reflect.KClass
 
 internal data class BuildInModules(
-    val tasks: List<TaskInfo>,
-    val handlers: Map<KClass<out TaskExecutor>, HandlerInfo>
+    val tasks: Map<KClass<out TaskExecutor>, TaskInfo>,
+    val handlers: Map<KClass<out TaskExecutor>, HandlerInfo>,
+    val taskTypes: Map<String, KClass<out TaskExecutor>>,
+    val awaitDependencies: List<KClass<out TaskExecutor>>
 ) {
     companion object {
+        internal const val PRE_ALLOC_SIZE = 128
         private const val TAG = "BuildInModules"
         private val MUTEX = Mutex()
         private lateinit var INSTANCE: BuildInModules
@@ -20,13 +23,22 @@ internal data class BuildInModules(
             trace(TAG, "get") {
                 MUTEX.withLock {
                     if (!::INSTANCE.isInitialized) {
-                        val handlers = ArrayMap<KClass<out TaskExecutor>, HandlerInfo>(128)
-                        val tasks = ArrayList<TaskInfo>(128)
+                        val taskTypes = ArrayMap<String, KClass<out TaskExecutor>>(PRE_ALLOC_SIZE)
+                        val awaitDependencies = ArrayList<KClass<out TaskExecutor>>(PRE_ALLOC_SIZE)
+                        val handlers =
+                            ArrayMap<KClass<out TaskExecutor>, HandlerInfo>(PRE_ALLOC_SIZE)
+                        val tasks = ArrayMap<KClass<out TaskExecutor>, TaskInfo>(PRE_ALLOC_SIZE)
                         val it = ServiceLoader.load(ModuleInfo::class.java, application.classLoader)
                             .iterator()
                         while (it.hasNext()) {
                             val module = it.next()
-                            tasks.addAll(module.tasks)
+                            for (task in module.tasks) {
+                                tasks[task.type] = task
+                                taskTypes[task.type.qualifiedName] = task.type
+                                if (task.isAwait) {
+                                    awaitDependencies.add(task.type)
+                                }
+                            }
                             for (handler in module.handlers) {
                                 val h = handlers[handler.taskType]
                                 if (h != null && h.priority >= handler.priority) {
@@ -35,7 +47,7 @@ internal data class BuildInModules(
                                 handlers[handler.taskType] = handler
                             }
                         }
-                        INSTANCE = BuildInModules(tasks, handlers)
+                        INSTANCE = BuildInModules(tasks, handlers, taskTypes, awaitDependencies)
                     }
                 }
             }
