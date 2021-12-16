@@ -64,10 +64,6 @@ class MultiTask @JvmOverloads @MainThread constructor(
             }.asCoroutineDispatcher()
         }
 
-        private fun MutableMap<KClass<out TaskExecutor>, TaskInfo>.add(task: TaskInfo) {
-            put(task.type, task)
-        }
-
         @JvmStatic
         @MainThread
         fun start(application: Application) {
@@ -105,7 +101,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             val result = try {
                 task.execute(application, results)
             } catch (e: Throwable) {
-                val uncaughtExceptionHandler = ModulesInfo.get(application)
+                val uncaughtExceptionHandler = BuildInModules.get(application)
                     .handlers[task.type]?.newInstance() ?: defaultUncaughtExceptionHandler
                 uncaughtExceptionHandler.handleException(application, e)
             }
@@ -196,9 +192,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     fun start() {
         val start = SystemClock.uptimeMillis()
-        Log.d(TAG, "begin invoke startup")
         GlobalScope.launch(BACKGROUND_THREAD) {
-            val modules = ModulesInfo.get(application)
+            val modules = BuildInModules.get(application)
             val tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo> = ArrayMap(modules.tasks.size)
             val mainThreadAwaitDependencies =
                 ArrayList<KClass<out TaskExecutor>>(modules.tasks.size)
@@ -245,8 +240,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 }
             }
             graph.add(startupFinishedTask)
-            startByTopologicalSort(graph)
-            Log.d(TAG, "end invoke startup, use time: ${SystemClock.uptimeMillis() - start}")
+            trace(TAG, "startByTopologicalSort") { startByTopologicalSort(graph) }
         }
     }
 }

@@ -82,7 +82,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                             TaskExecutorType.RemoteAsync
                         else
                             TaskExecutorType.RemoteAwait
-                        val (tasks) = ModulesInfo.get(application)
+                        val (tasks) = BuildInModules.get(application)
                         val taskInfo = tasks.find {
                             it.executor == executor && it.name == name && it.process == process
                                     && it.type.qualifiedName == type
