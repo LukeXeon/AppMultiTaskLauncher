@@ -77,10 +77,6 @@ class MultiTask @JvmOverloads @MainThread constructor(
         }
     }
 
-    private val internalTasks = arrayOf(
-        UnlockMainThreadTask::class,
-        StartupFinishedTask::class
-    )
     private val mainThread = ExclusiveMainThreadExecutor()
         .asCoroutineDispatcher()
 
@@ -91,12 +87,9 @@ class MultiTask @JvmOverloads @MainThread constructor(
         dependencies: List<Job>
     ): Job {
         return GlobalScope.launch(if (task.isMainThread) mainThread else BACKGROUND_THREAD) {
-            dependencies.forEach { it.join() }
+            dependencies.joinAll()
             val name = task.name
-            val isInternalTask = internalTasks.contains(task.type)
-            if (!isInternalTask) {
-                tracker.onTaskStartup(name)
-            }
+            tracker.onTaskStartup(name)
             val start = SystemClock.uptimeMillis()
             val result = try {
                 task.execute(application, results)
@@ -106,47 +99,14 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 uncaughtExceptionHandler.handleException(application, e)
             }
             val time = SystemClock.uptimeMillis() - start
-            if (!isInternalTask) {
-                tracker.onTaskFinished(name, time)
-            }
+            tracker.onTaskFinished(name, time)
             if (result != null) {
                 results[task.type] = result
             }
         }
     }
 
-    private suspend fun unlockMainThread(time: Long) {
-        mainThread.close()
-        tracker.onUnlockMainThread(time)
-    }
-
-    private suspend fun startupFinished(time: Long) {
-        tracker.onStartupFinished(time)
-    }
-
-    internal inner class UnlockMainThreadTask(private val start: Long) : TaskExecutor {
-
-        override suspend fun execute(
-            application: Application,
-            results: Map<KClass<out TaskExecutor>, Parcelable>
-        ): Parcelable? {
-            unlockMainThread(SystemClock.uptimeMillis() - start)
-            return null
-        }
-    }
-
-    internal inner class StartupFinishedTask(private val start: Long) : TaskExecutor {
-        override suspend fun execute(
-            application: Application,
-            results: Map<KClass<out TaskExecutor>, Parcelable>
-        ): Parcelable? {
-            startupFinished(SystemClock.uptimeMillis() - start)
-            return null
-        }
-
-    }
-
-    private fun startByTopologicalSort(graph: Map<KClass<out TaskExecutor>, TaskInfo>) {
+    private fun startByTopologicalSort(graph: Map<KClass<out TaskExecutor>, TaskInfo>): MutableMap<KClass<out TaskExecutor>, Job> {
         val unmarked = ArrayList<TaskInfo>(graph.size)
         val temporaryMarked = ArraySet<TaskInfo>(graph.size)
         val results = ConcurrentHashMap<KClass<out TaskExecutor>, Parcelable>(graph.size)
@@ -187,60 +147,48 @@ class MultiTask @JvmOverloads @MainThread constructor(
         while (unmarked.isNotEmpty()) {
             visit(unmarked.first())
         }
-
+        return jobs
     }
 
     fun start() {
         val start = SystemClock.uptimeMillis()
         GlobalScope.launch(BACKGROUND_THREAD) {
             val modules = BuildInModules.get(application)
-            val tasks: MutableMap<KClass<out TaskExecutor>, TaskInfo> = ArrayMap(modules.tasks.size)
-            val mainThreadAwaitDependencies =
-                ArrayList<KClass<out TaskExecutor>>(modules.tasks.size)
+            val graph = ArrayMap<KClass<out TaskExecutor>, TaskInfo>(
+                modules.tasks.size
+            )
+            val mainThreadAwaitDependencies = ArrayList<KClass<out TaskExecutor>>(
+                modules.tasks.size
+            )
             for (task in modules.tasks) {
-                tasks[task.type] = task
+                graph[task.type] = task
                 if (task.isAwait) {
                     mainThreadAwaitDependencies.add(task.type)
                 }
             }
-            if (tasks.isNullOrEmpty()) {
+            if (mainThreadAwaitDependencies.isEmpty()) {
+                mainThread.close()
+            }
+            if (graph.isNullOrEmpty()) {
                 val time = SystemClock.uptimeMillis() - start
-                unlockMainThread(time)
-                startupFinished(time)
+                tracker.onUnlockMainThread(time)
+                tracker.onStartupFinished(time)
                 return@launch
             }
-
-            val graph = ArrayMap<KClass<out TaskExecutor>, TaskInfo>(
-                tasks.size + internalTasks.size
-            )
-            graph.putAll(tasks)
-
-            if (!mainThreadAwaitDependencies.isNullOrEmpty()) {
-                val unlockMainThreadTask = object : InternalTaskInfo(
-                    UnlockMainThreadTask::class,
-                    mainThreadAwaitDependencies,
-                    TaskExecutorType.Main
-                ) {
-                    override fun newInstance(): TaskExecutor {
-                        return UnlockMainThreadTask(start)
+            val jobs = trace(TAG, "startByTopologicalSort") { startByTopologicalSort(graph) }
+            if (mainThreadAwaitDependencies.isNotEmpty()) {
+                for (type in mainThreadAwaitDependencies) {
+                    val job = jobs[type]
+                    if (job != null) {
+                        jobs.remove(type)
+                        job.join()
                     }
-
                 }
-                graph.add(unlockMainThreadTask)
-            } else {
-                unlockMainThread(SystemClock.uptimeMillis() - start)
+                mainThread.close()
             }
-
-            val startupFinishedTask = object : InternalTaskInfo(
-                StartupFinishedTask::class,
-                tasks.keys
-            ) {
-                override fun newInstance(): TaskExecutor {
-                    return StartupFinishedTask(start)
-                }
-            }
-            graph.add(startupFinishedTask)
-            trace(TAG, "startByTopologicalSort") { startByTopologicalSort(graph) }
+            tracker.onUnlockMainThread(SystemClock.uptimeMillis() - start)
+            jobs.values.joinAll()
+            tracker.onStartupFinished(SystemClock.uptimeMillis() - start)
         }
     }
 }
