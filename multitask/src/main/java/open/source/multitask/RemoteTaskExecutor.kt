@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.*
-import androidx.collection.ArrayMap
 import androidx.core.app.BundleCompat
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -26,9 +25,9 @@ open class RemoteTaskExecutor : ContentProvider() {
     companion object {
         private const val BINDER_KEY = "binder"
         private val STATES_MUTEX = Mutex()
-        private val STATES = ArrayMap<String, TaskState>(BuildInModules.PRE_ALLOC_SIZE)
+        private val STATES = HashMap<String, TaskState>(BuildInModules.PRE_ALLOC_SIZE)
         private val SERVICES_MUTEX = Mutex()
-        private val SERVICES = ArrayMap<String, ServiceConnection>(BuildInModules.PRE_ALLOC_SIZE)
+        private val SERVICES = HashMap<String, ServiceConnection>(BuildInModules.PRE_ALLOC_SIZE)
 
         private suspend fun <T> broadcast(
             application: Application,
@@ -36,7 +35,7 @@ open class RemoteTaskExecutor : ContentProvider() {
             action: suspend (IRemoteTaskExecutorService) -> T
         ): T {
             SERVICES_MUTEX.withLock {
-                if (SERVICES.isEmpty) {
+                if (SERVICES.isEmpty()) {
                     application.packageManager
                         .getPackageInfo(
                             application.packageName,
@@ -94,10 +93,10 @@ open class RemoteTaskExecutor : ContentProvider() {
                                 )
                             }
                         } ?: throw ClassNotFoundException("task class $type not found ")
-                        val map = ArrayMap<KClass<out TaskExecutor>, Parcelable>(results.size)
+                        val map = HashMap<KClass<out TaskExecutor>, Parcelable>(results.size)
                         for ((k, v) in results) {
                             val t = types[k]
-                            if (t != null) {
+                            if (t != null && v != null) {
                                 map[t] = v
                             }
                         }

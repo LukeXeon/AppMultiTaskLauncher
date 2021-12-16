@@ -5,16 +5,14 @@ import android.os.Build
 import android.os.Parcelable
 import android.os.Process
 import android.os.SystemClock
-import android.util.Log
 import androidx.annotation.MainThread
-import androidx.collection.ArrayMap
-import androidx.collection.ArraySet
 import kotlinx.coroutines.*
-import open.source.multitask.annotations.TaskExecutorType
 import java.util.*
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
+import kotlin.collections.HashSet
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.reflect.KClass
@@ -108,10 +106,10 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     private fun startByTopologicalSort(graph: Map<KClass<out TaskExecutor>, TaskInfo>): MutableMap<KClass<out TaskExecutor>, Job> {
         val unmarked = ArrayList<TaskInfo>(graph.size)
-        val temporaryMarked = ArraySet<TaskInfo>(graph.size)
+        val temporaryMarked = HashSet<TaskInfo>(graph.size)
         val results = ConcurrentHashMap<KClass<out TaskExecutor>, Parcelable>(graph.size)
         // sorted list modify to map ↓
-        val jobs = ArrayMap<KClass<out TaskExecutor>, Job>(graph.size)
+        val jobs = HashMap<KClass<out TaskExecutor>, Job>(graph.size)
         fun visit(node: TaskInfo) {
             if (jobs.containsKey(node.type)) {
                 return
