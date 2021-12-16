@@ -1,27 +1,35 @@
 package open.source.multitask
 
 import android.util.Log
+import kotlin.reflect.KClass
 
 interface TaskTracker {
-    suspend fun onTaskStartup(name: String)
+    fun onTaskStart(type: KClass<out TaskExecutor>, name: String)
 
-    suspend fun onTaskFinished(name: String, time: Long)
+    fun onTaskFinish(type: KClass<out TaskExecutor>, name: String, time: Long)
 
-    suspend fun onUnlockMainThread(time: Long)
+    fun onStartFinish(time: Long)
 
-    suspend fun onStartupFinished(time: Long)
+    fun onTasksFinish(time: Long)
 
     companion object Default : TaskTracker {
         private const val TAG = "TaskTracker"
 
-        override suspend fun onTaskStartup(name: String) {
+        override fun onTaskStart(
+            type: KClass<out TaskExecutor>,
+            name: String
+        ) {
             Log.v(
                 TAG, "task startup: $name, " +
                         "thread: ${Thread.currentThread().name}"
             )
         }
 
-        override suspend fun onTaskFinished(name: String, time: Long) {
+        override fun onTaskFinish(
+            type: KClass<out TaskExecutor>,
+            name: String,
+            time: Long
+        ) {
             Log.v(
                 TAG, "task finished: $name, " +
                         "thread: ${Thread.currentThread().name}, " +
@@ -29,12 +37,12 @@ interface TaskTracker {
             )
         }
 
-        override suspend fun onUnlockMainThread(time: Long) {
-            Log.d(TAG, "main thread unlock, use time: $time")
+        override fun onStartFinish(time: Long) {
+            Log.d(TAG, "start finish, use time: $time")
         }
 
-        override suspend fun onStartupFinished(time: Long) {
-            Log.d(TAG, "all task finished, use time: $time")
+        override fun onTasksFinish(time: Long) {
+            Log.d(TAG, "tasks finished, use time: $time")
         }
 
     }

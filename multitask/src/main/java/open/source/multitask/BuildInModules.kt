@@ -10,12 +10,12 @@ import kotlin.reflect.KClass
 
 internal data class BuildInModules(
     val tasks: Map<KClass<out TaskExecutor>, TaskInfo>,
-    val handlers: Map<KClass<out TaskExecutor>, HandlerInfo>,
-    val taskTypes: Map<String?, KClass<out TaskExecutor>>,
-    val awaitDependencies: List<KClass<out TaskExecutor>>
+    val awaitDependencies: List<KClass<out TaskExecutor>>,
+    val handlers: Map<KClass<out TaskExecutor>, HandlerInfo>
 ) {
+
     companion object {
-        internal const val PRE_ALLOC_SIZE = 64
+        private const val PRE_ALLOC_SIZE = 64
         private const val TAG = "BuildInModules"
         private val MUTEX = Mutex()
         private lateinit var INSTANCE: BuildInModules
@@ -23,7 +23,6 @@ internal data class BuildInModules(
             trace(TAG, "get") {
                 MUTEX.withLock {
                     if (!::INSTANCE.isInitialized) {
-                        val taskTypes = HashMap<String?, KClass<out TaskExecutor>>(PRE_ALLOC_SIZE)
                         val awaitDependencies = ArrayList<KClass<out TaskExecutor>>(PRE_ALLOC_SIZE)
                         val handlers = HashMap<KClass<out TaskExecutor>, HandlerInfo>(
                             PRE_ALLOC_SIZE
@@ -47,7 +46,7 @@ internal data class BuildInModules(
                                 handlers[handler.taskType] = handler
                             }
                         }
-                        INSTANCE = BuildInModules(tasks, handlers, taskTypes, awaitDependencies)
+                        INSTANCE = BuildInModules(tasks, awaitDependencies, handlers)
                     }
                 }
             }

@@ -87,7 +87,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
         return GlobalScope.launch(if (task.isMainThread) mainThread else BACKGROUND_THREAD) {
             dependencies.joinAll()
             val name = task.name
-            tracker.onTaskStartup(name)
+            tracker.onTaskStart(task.type, name)
             val start = SystemClock.uptimeMillis()
             val result = try {
                 task.execute(application, results)
@@ -97,7 +97,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
                 uncaughtExceptionHandler.handleException(application, e)
             }
             val time = SystemClock.uptimeMillis() - start
-            tracker.onTaskFinished(name, time)
+            tracker.onTaskFinish(task.type, name, time)
             if (result != null) {
                 results[task.type] = result
             }
@@ -156,12 +156,12 @@ class MultiTask @JvmOverloads @MainThread constructor(
             val mainThreadAwaitDependencies = modules.awaitDependencies
             if (mainThreadAwaitDependencies.isEmpty()) {
                 mainThread.close()
-                tracker.onUnlockMainThread(SystemClock.uptimeMillis() - start)
+                tracker.onStartFinish(SystemClock.uptimeMillis() - start)
             }
             if (graph.isNullOrEmpty()) {
                 val time = SystemClock.uptimeMillis() - start
-                tracker.onUnlockMainThread(time)
-                tracker.onStartupFinished(time)
+                tracker.onStartFinish(time)
+                tracker.onTasksFinish(time)
                 return@launch
             }
             val jobs = trace(TAG, "startByTopologicalSort") { startByTopologicalSort(graph) }
@@ -174,10 +174,10 @@ class MultiTask @JvmOverloads @MainThread constructor(
                     }
                 }
                 mainThread.close()
-                tracker.onUnlockMainThread(SystemClock.uptimeMillis() - start)
+                tracker.onStartFinish(SystemClock.uptimeMillis() - start)
             }
             jobs.values.joinAll()
-            tracker.onStartupFinished(SystemClock.uptimeMillis() - start)
+            tracker.onTasksFinish(SystemClock.uptimeMillis() - start)
         }
     }
 }

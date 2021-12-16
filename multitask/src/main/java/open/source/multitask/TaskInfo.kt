@@ -35,8 +35,7 @@ abstract class TaskInfo(
         direct: Boolean = false
     ): Parcelable? {
         return if (!direct && isRemote) {
-            RemoteTaskExecutor.Client(this)
-                .execute(application, results)
+            RemoteTaskClient(this).execute(application, results)
         } else {
             return newInstance().execute(application, results)
         }
