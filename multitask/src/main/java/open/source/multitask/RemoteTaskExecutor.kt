@@ -29,6 +29,19 @@ open class RemoteTaskExecutor : ContentProvider() {
         private val STATES = ArrayMap<String, TaskState>(128)
         private val SERVICES_MUTEX = Mutex()
         private val SERVICES = ArrayMap<String, ServiceConnection>(8)
+        private val TYPES_MUTEX = Mutex()
+        private lateinit var TYPES: Map<String?, KClass<out TaskExecutor>>
+
+        private suspend fun getTasks(application: Application): Pair<List<TaskInfo>, Map<String?, KClass<out TaskExecutor>>> {
+            val (tasks) = BuildInModules.get(application)
+            TYPES_MUTEX.withLock {
+                if (!::TYPES.isInitialized) {
+                    TYPES = tasks.map { it.type.qualifiedName to it.type }
+                        .toMap()
+                }
+            }
+            return tasks to TYPES
+        }
 
         private suspend fun <T> broadcast(
             application: Application,
@@ -82,7 +95,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                             TaskExecutorType.RemoteAsync
                         else
                             TaskExecutorType.RemoteAwait
-                        val (tasks) = BuildInModules.get(application)
+                        val (tasks, types) = getTasks(application)
                         val taskInfo = tasks.find {
                             it.executor == executor && it.name == name && it.process == process
                                     && it.type.qualifiedName == type
@@ -92,9 +105,6 @@ open class RemoteTaskExecutor : ContentProvider() {
                                 )
                             }
                         } ?: throw ClassNotFoundException("task class $type not found ")
-                        val types = tasks.asIterable()
-                            .map { it.type.qualifiedName to it.type }
-                            .toMap()
                         val map = ArrayMap<KClass<out TaskExecutor>, Parcelable>(results.size)
                         for ((k, v) in results) {
                             val t = types[k]

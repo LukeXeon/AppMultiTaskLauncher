@@ -168,6 +168,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
             }
             if (mainThreadAwaitDependencies.isEmpty()) {
                 mainThread.close()
+                tracker.onUnlockMainThread(SystemClock.uptimeMillis() - start)
             }
             if (graph.isNullOrEmpty()) {
                 val time = SystemClock.uptimeMillis() - start
@@ -185,8 +186,8 @@ class MultiTask @JvmOverloads @MainThread constructor(
                     }
                 }
                 mainThread.close()
+                tracker.onUnlockMainThread(SystemClock.uptimeMillis() - start)
             }
-            tracker.onUnlockMainThread(SystemClock.uptimeMillis() - start)
             jobs.values.joinAll()
             tracker.onStartupFinished(SystemClock.uptimeMillis() - start)
         }
