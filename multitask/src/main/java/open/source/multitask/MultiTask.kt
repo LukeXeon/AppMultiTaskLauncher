@@ -1,10 +1,7 @@
 package open.source.multitask
 
 import android.app.Application
-import android.os.Build
-import android.os.Parcelable
-import android.os.Process
-import android.os.SystemClock
+import android.os.*
 import androidx.annotation.MainThread
 import kotlinx.coroutines.*
 import java.util.*
@@ -81,33 +78,26 @@ class MultiTask @JvmOverloads @MainThread constructor(
 
     private fun startJob(
         task: TaskInfo,
-        results: MutableMap<KClass<out TaskExecutor>, Parcelable>,
+        results: Bundle,
         dependencies: List<Job>
     ): Job {
         return GlobalScope.launch(if (task.isMainThread) mainThread else BACKGROUND_THREAD) {
             dependencies.joinAll()
-            val name = task.name
-            tracker.onTaskStart(task.type, name)
-            val start = SystemClock.uptimeMillis()
             val result = try {
-                task.execute(application, results)
+                task.execute(application, results, tracker)
             } catch (e: Throwable) {
                 val uncaughtExceptionHandler = BuildInModules.get(application)
                     .handlers[task.type]?.newInstance() ?: defaultUncaughtExceptionHandler
                 uncaughtExceptionHandler.handleException(application, e)
             }
-            val time = SystemClock.uptimeMillis() - start
-            tracker.onTaskFinish(task.type, name, time)
-            if (result != null) {
-                results[task.type] = result
-            }
+            results.putParcelable(task.name, result)
         }
     }
 
     private fun startByTopologicalSort(graph: Map<KClass<out TaskExecutor>, TaskInfo>): MutableMap<KClass<out TaskExecutor>, Job> {
         val unmarked = ArrayList<TaskInfo>(graph.size)
         val temporaryMarked = HashSet<TaskInfo>(graph.size)
-        val results = ConcurrentHashMap<KClass<out TaskExecutor>, Parcelable>(graph.size)
+        val results = Bundle(graph.size)
         // sorted list modify to map ↓
         val jobs = HashMap<KClass<out TaskExecutor>, Job>(graph.size)
         fun visit(node: TaskInfo) {

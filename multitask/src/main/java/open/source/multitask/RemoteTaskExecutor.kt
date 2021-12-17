@@ -32,7 +32,7 @@ open class RemoteTaskExecutor : ContentProvider() {
 
         internal suspend fun execute(
             application: Application,
-            results: Map<KClass<out TaskExecutor>, Parcelable>
+            results: Bundle
         ): RemoteTaskResult {
             mutex.withLock {
                 var value = result
@@ -40,8 +40,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                     value = RemoteTaskResult(
                         taskInfo.execute(
                             application,
-                            results,
-                            direct = true
+                            results
                         )
                     )
                     result = value
@@ -59,7 +58,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                 isAsync: Boolean,
                 process: String,
                 dependencies: List<String>,
-                results: List<ParcelKeyValue>,
+                results: Bundle,
                 callback: IRemoteTaskCallback
             ) {
                 val application = context?.applicationContext as? Application
@@ -84,21 +83,13 @@ open class RemoteTaskExecutor : ContentProvider() {
                                 )
                             }
                         } ?: throw ClassNotFoundException("task class $type not found ")
-                        val types = tasks.mapKeys { it.key.qualifiedName }
-                        val map = HashMap<KClass<out TaskExecutor>, Parcelable>(results.size)
-                        for ((k, v) in results) {
-                            val t = types[k]?.type
-                            if (t != null && v != null) {
-                                map[t] = v
-                            }
-                        }
                         val state = STATES_MUTEX.withLock {
                             STATES.getOrPut(taskInfo) { TaskState(taskInfo) }
                         }
                         callback.onCompleted(
                             state.execute(
                                 application,
-                                map
+                                results
                             )
                         )
                     } catch (e: Throwable) {

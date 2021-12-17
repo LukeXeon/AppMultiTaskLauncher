@@ -2,6 +2,7 @@
 package open.source.multitask;
 import open.source.multitask.IRemoteTaskCallback;
 import open.source.multitask.ParcelKeyValue;
+import android.os.Bundle;
 
 // Declare any non-default types here with import statements
 
@@ -16,7 +17,7 @@ interface IRemoteTaskExecutorService {
         boolean isAsync,
         String process,
         in List<String> dependencies,
-        in List<ParcelKeyValue> results,
+        in Bundle results,
         in IRemoteTaskCallback callback
     );
 }

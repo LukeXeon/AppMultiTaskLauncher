@@ -3,10 +3,7 @@ package open.source.multitask
 import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.DeadObjectException
-import android.os.IBinder
-import android.os.Parcelable
-import android.os.RemoteCallbackList
+import android.os.*
 import androidx.core.app.BundleCompat
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -85,7 +82,7 @@ internal class RemoteTaskClient(
 
     override suspend fun execute(
         application: Application,
-        results: Map<KClass<out TaskExecutor>, Parcelable>
+        results: Bundle
     ): Parcelable? {
         val services = getServices(application)
         val connection = services.getValue(taskInfo.process)
@@ -121,7 +118,7 @@ internal class RemoteTaskClient(
                     isAsync,
                     taskInfo.process,
                     taskInfo.dependencies.mapTo(ArrayList(taskInfo.dependencies.size)) { it.qualifiedName },
-                    results.map { ParcelKeyValue(it.key.qualifiedName, it.value) },
+                    results,
                     callback
                 )
             }

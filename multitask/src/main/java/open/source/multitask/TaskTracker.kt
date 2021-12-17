@@ -1,12 +1,11 @@
 package open.source.multitask
 
 import android.util.Log
-import kotlin.reflect.KClass
 
 interface TaskTracker {
-    fun onTaskStart(type: KClass<out TaskExecutor>, name: String)
+    fun onTaskStart(executor: TaskExecutor, name: String)
 
-    fun onTaskFinish(type: KClass<out TaskExecutor>, name: String, time: Long)
+    fun onTaskFinish(executor: TaskExecutor, name: String, time: Long)
 
     fun onStartFinish(time: Long)
 
@@ -16,7 +15,7 @@ interface TaskTracker {
         private const val TAG = "TaskTracker"
 
         override fun onTaskStart(
-            type: KClass<out TaskExecutor>,
+            executor: TaskExecutor,
             name: String
         ) {
             Log.v(
@@ -26,7 +25,7 @@ interface TaskTracker {
         }
 
         override fun onTaskFinish(
-            type: KClass<out TaskExecutor>,
+            executor: TaskExecutor,
             name: String,
             time: Long
         ) {

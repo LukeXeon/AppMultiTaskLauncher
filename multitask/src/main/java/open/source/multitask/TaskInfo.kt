@@ -1,7 +1,9 @@
 package open.source.multitask
 
 import android.app.Application
+import android.os.Bundle
 import android.os.Parcelable
+import android.os.SystemClock
 import open.source.multitask.annotations.TaskExecutorType
 import kotlin.reflect.KClass
 
@@ -31,14 +33,26 @@ abstract class TaskInfo(
 
     internal suspend fun execute(
         application: Application,
-        results: Map<KClass<out TaskExecutor>, Parcelable>,
-        direct: Boolean = false
+        results: Bundle
     ): Parcelable? {
-        return if (!direct && isRemote) {
-            RemoteTaskClient(this).execute(application, results)
+        return newInstance().execute(application, results)
+    }
+
+    internal suspend fun execute(
+        application: Application,
+        results: Bundle,
+        tracker: TaskTracker
+    ): Parcelable? {
+        val executor = if (isRemote) {
+            RemoteTaskClient(this)
         } else {
-            return newInstance().execute(application, results)
+            newInstance()
         }
+        val start = SystemClock.uptimeMillis()
+        tracker.onTaskStart(executor, name)
+        val r = executor.execute(application, results)
+        tracker.onTaskFinish(executor, name, SystemClock.uptimeMillis() - start)
+        return r
     }
 
     protected abstract fun newInstance(): TaskExecutor
