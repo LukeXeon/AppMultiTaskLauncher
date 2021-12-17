@@ -8,6 +8,6 @@ import kotlin.reflect.KClass
 interface TaskExecutor {
     suspend fun execute(
         application: Application,
-        results: Bundle
+        results: Map<String, Parcelable>
     ): Parcelable?
 }

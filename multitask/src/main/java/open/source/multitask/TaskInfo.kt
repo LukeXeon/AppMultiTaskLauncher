@@ -33,14 +33,14 @@ abstract class TaskInfo(
 
     internal suspend fun execute(
         application: Application,
-        results: Bundle
+        results: Map<String, Parcelable>
     ): Parcelable? {
         return newInstance().execute(application, results)
     }
 
     internal suspend fun execute(
         application: Application,
-        results: Bundle,
+        results: Map<String, Parcelable>,
         tracker: TaskTracker
     ): Parcelable? {
         val executor = if (isRemote) {

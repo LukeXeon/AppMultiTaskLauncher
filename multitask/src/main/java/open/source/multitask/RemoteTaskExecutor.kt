@@ -32,7 +32,7 @@ open class RemoteTaskExecutor : ContentProvider() {
 
         internal suspend fun execute(
             application: Application,
-            results: Bundle
+            results: Map<String, Parcelable>
         ): RemoteTaskResult {
             mutex.withLock {
                 var value = result
@@ -58,7 +58,7 @@ open class RemoteTaskExecutor : ContentProvider() {
                 isAsync: Boolean,
                 process: String,
                 dependencies: List<String>,
-                results: Bundle,
+                results: List<ParcelKeyValue>,
                 callback: IRemoteTaskCallback
             ) {
                 val application = context?.applicationContext as? Application
@@ -89,7 +89,13 @@ open class RemoteTaskExecutor : ContentProvider() {
                         callback.onCompleted(
                             state.execute(
                                 application,
-                                results
+                                HashMap<String, Parcelable>(results.size).apply {
+                                    for ((k, v) in results) {
+                                        if (k != null && v != null) {
+                                            put(k, v)
+                                        }
+                                    }
+                                }
                             )
                         )
                     } catch (e: Throwable) {

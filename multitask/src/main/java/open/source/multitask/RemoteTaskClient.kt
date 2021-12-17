@@ -82,7 +82,7 @@ internal class RemoteTaskClient(
 
     override suspend fun execute(
         application: Application,
-        results: Bundle
+        results: Map<String, Parcelable>
     ): Parcelable? {
         val services = getServices(application)
         val connection = services.getValue(taskInfo.process)
@@ -118,7 +118,7 @@ internal class RemoteTaskClient(
                     isAsync,
                     taskInfo.process,
                     taskInfo.dependencies.mapTo(ArrayList(taskInfo.dependencies.size)) { it.qualifiedName },
-                    results,
+                    results.map { ParcelKeyValue(it.key, it.value) },
                     callback
                 )
             }
