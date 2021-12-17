@@ -8,8 +8,8 @@ import java.util.*
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.collections.ArrayList
-import kotlin.collections.HashMap
 import kotlin.collections.HashSet
+import kotlin.collections.LinkedHashMap
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.reflect.KClass
@@ -101,7 +101,7 @@ class MultiTask @JvmOverloads @MainThread constructor(
         val temporaryMarked = HashSet<TaskInfo>(graph.size)
         val results = ConcurrentHashMap<String, Parcelable>(graph.size)
         // sorted list modify to map ↓
-        val jobs = HashMap<KClass<out TaskExecutor>, Job>(graph.size)
+        val jobs = LinkedHashMap<KClass<out TaskExecutor>, Job>(graph.size)
         fun visit(node: TaskInfo) {
             if (jobs.containsKey(node.type)) {
                 return
