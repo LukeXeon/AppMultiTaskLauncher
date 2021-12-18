@@ -85,7 +85,7 @@ internal class RemoteTaskClient(
         results: Map<String, Parcelable>
     ): Parcelable? {
         val services = getServices(application)
-        val connection = services.getValue(taskInfo.process)
+        val connection = services.getValue(application.packageName + taskInfo.process)
         return connection.broadcast(application) { service ->
             suspendCoroutine { continuation ->
                 val isCompleted = AtomicBoolean()
